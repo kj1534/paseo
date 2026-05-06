@@ -9,7 +9,7 @@ import {
   userAttachmentsOnly,
 } from "@/attachments/workspace-attachment-utils";
 import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
-import { generateMessageId, type StreamItem } from "@/types/stream";
+import { generateMessageId, type StreamItem, type UserMessageDeliveryHint } from "@/types/stream";
 import type { PickedImageAttachmentInput } from "@/hooks/image-attachment-picker";
 
 export interface QueuedComposerMessage {
@@ -123,6 +123,7 @@ export interface DispatchComposerAgentMessageInput {
     images: AttachmentMetadata[],
   ) => Promise<Array<{ data: string; mimeType: string }> | undefined>;
   stream: AgentStreamWriter;
+  deliveryHint?: UserMessageDeliveryHint;
 }
 
 export async function dispatchComposerAgentMessage(
@@ -137,6 +138,7 @@ export async function dispatchComposerAgentMessage(
     timestamp: new Date(),
     ...(wirePayload.images.length > 0 ? { images: wirePayload.images } : {}),
     ...(wirePayload.attachments.length > 0 ? { attachments: wirePayload.attachments } : {}),
+    ...(input.deliveryHint ? { deliveryHint: input.deliveryHint } : {}),
   };
   appendUserMessageToStream(input.agentId, userMessage, input.stream);
   const imagesData = await input.encodeImages(wirePayload.images);

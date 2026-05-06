@@ -152,6 +152,7 @@ const CODEX_APP_SERVER_CAPABILITIES: AgentCapabilityFlags = {
   supportsMcpServers: true,
   supportsReasoningStream: true,
   supportsToolInvocations: true,
+  supportsSteering: true,
 };
 
 const CODEX_MODES: AgentMode[] = [
@@ -2731,6 +2732,7 @@ class CodexAppServerAgentSession implements AgentSession {
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private nextTurnOrdinal = 0;
   private activeForegroundTurnId: string | null = null;
+  private activeAppServerTurnId: string | null = null;
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private serviceTier: "fast" | null = null;
   private planModeEnabled = false;
@@ -3166,6 +3168,13 @@ class CodexAppServerAgentSession implements AgentSession {
     return args ? `$${commandName} ${args}` : `$${commandName}`;
   }
 
+  private async buildEffectivePromptInput(prompt: AgentPromptInput): Promise<CodexPromptInput> {
+    const slashCommand = await this.resolveSlashCommandInvocation(prompt);
+    return slashCommand
+      ? await this.buildCommandPromptInput(slashCommand.commandName, slashCommand.args)
+      : prompt;
+  }
+
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
     return runProviderTurn({
       prompt,
@@ -3198,10 +3207,7 @@ class CodexAppServerAgentSession implements AgentSession {
       throw new Error("Codex client not initialized");
     }
 
-    const slashCommand = await this.resolveSlashCommandInvocation(prompt);
-    const effectivePrompt = slashCommand
-      ? await this.buildCommandPromptInput(slashCommand.commandName, slashCommand.args)
-      : prompt;
+    const effectivePrompt = await this.buildEffectivePromptInput(prompt);
 
     if (this.currentThreadId) {
       await this.ensureThreadLoaded();
@@ -3258,15 +3264,48 @@ class CodexAppServerAgentSession implements AgentSession {
 
     const turnId = this.createTurnId();
     this.activeForegroundTurnId = turnId;
+    this.activeAppServerTurnId = null;
 
     try {
-      await this.client.request("turn/start", params, TURN_START_TIMEOUT_MS);
+      const response = await this.client.request("turn/start", params, TURN_START_TIMEOUT_MS);
+      this.rememberStartedAppServerTurn(response);
     } catch (error) {
       this.activeForegroundTurnId = null;
+      this.activeAppServerTurnId = null;
       throw error;
     }
 
     return { turnId };
+  }
+
+  private rememberStartedAppServerTurn(response: unknown): void {
+    const record = toObjectRecord(response);
+    const turn = toObjectRecord(record?.turn);
+    this.activeAppServerTurnId = typeof turn?.id === "string" ? turn.id : null;
+  }
+
+  async steerTurn(prompt: AgentPromptInput, _options?: AgentRunOptions): Promise<void> {
+    await this.connect();
+    if (!this.client) {
+      throw new Error("Codex client not initialized");
+    }
+    if (!this.currentThreadId) {
+      throw new Error("Cannot steer Codex turn without an active thread");
+    }
+    if (!this.activeForegroundTurnId) {
+      throw new Error("Cannot steer Codex turn without an active foreground turn");
+    }
+    if (!this.activeAppServerTurnId) {
+      throw new Error("Cannot steer Codex turn without an active app-server turn");
+    }
+
+    const effectivePrompt = await this.buildEffectivePromptInput(prompt);
+    const input = await this.buildUserInput(effectivePrompt);
+    await this.client.request("turn/steer", {
+      threadId: this.currentThreadId,
+      input,
+      expectedTurnId: this.activeAppServerTurnId,
+    });
   }
 
   subscribe(callback: (event: AgentStreamEvent) => void): () => void {
@@ -3564,6 +3603,7 @@ class CodexAppServerAgentSession implements AgentSession {
     this.resolvedPermissionRequests.clear();
     this.subscribers.clear();
     this.activeForegroundTurnId = null;
+    this.activeAppServerTurnId = null;
     if (this.client) {
       await this.client.dispose();
     }
@@ -4082,6 +4122,7 @@ class CodexAppServerAgentSession implements AgentSession {
       return;
     }
     this.currentTurnId = parsed.turnId;
+    this.activeAppServerTurnId = parsed.turnId;
     this.resetTurnTrackingState();
     this.emitEvent({ type: "turn_started", provider: CODEX_PROVIDER });
   }
@@ -4119,6 +4160,7 @@ class CodexAppServerAgentSession implements AgentSession {
       });
     }
     this.activeForegroundTurnId = null;
+    this.activeAppServerTurnId = null;
     this.resetTurnTrackingState();
   }
 

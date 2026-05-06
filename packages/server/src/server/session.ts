@@ -1148,14 +1148,16 @@ export class Session {
     );
     let iterator: AsyncGenerator<AgentStreamEvent>;
     try {
-      const shouldReplace = this.agentManager.hasInFlightRun(agentId);
-      iterator = shouldReplace
-        ? this.agentManager.replaceAgentRun(agentId, prompt, runOptions)
-        : this.agentManager.streamAgent(agentId, prompt, runOptions);
-      this.sessionLogger.trace(
-        { agentId, shouldReplace },
-        "startAgentStream: agent iterator returned",
-      );
+      const result = this.agentManager.startAgentRun(agentId, prompt, {
+        replaceRunning: true,
+        runOptions,
+      });
+      if (result.outOfBand) {
+        this.sessionLogger.trace({ agentId }, "startAgentStream: out-of-band command accepted");
+        return { ok: true };
+      }
+      iterator = result.events;
+      this.sessionLogger.trace({ agentId }, "startAgentStream: agent iterator returned");
     } catch (error) {
       this.handleAgentRunError(agentId, error, "Failed to start agent run");
       return { ok: false, error: errorToFriendlyMessage(error) };

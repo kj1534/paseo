@@ -175,17 +175,11 @@ export function startAgentRun(
   logger: Logger,
   options?: StartAgentRunOptions,
 ): { outOfBand: boolean } {
-  // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
-  // in-flight turn — replaceAgentRun would interrupt the running turn. The
-  // intercept lives at this layer so it covers every prompt entrypoint.
-  if (agentManager.tryRunOutOfBand(agentId, prompt)) {
+  const result = agentManager.startAgentRun(agentId, prompt, options);
+  if (result.outOfBand) {
     return { outOfBand: true };
   }
-  const shouldReplace = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
-  const runOptions = options?.runOptions;
-  const iterator = shouldReplace
-    ? agentManager.replaceAgentRun(agentId, prompt, runOptions)
-    : agentManager.streamAgent(agentId, prompt, runOptions);
+  const iterator = result.events;
   void (async () => {
     try {
       for await (const _ of iterator) {

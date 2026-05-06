@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import {
@@ -512,7 +512,10 @@ describe("ClaudeAgentSession context window usage", () => {
     return session as unknown as TestClaudeSession;
   }
 
-  function createQueryFactoryForTurns(turns: Array<Array<Record<string, unknown>>>) {
+  function createQueryFactoryForTurns(
+    turns: Array<Array<Record<string, unknown>>>,
+    onPrompt?: (prompt: unknown) => void,
+  ) {
     return vi.fn(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
       const queuedMessages: Array<Record<string, unknown>> = [];
       const waiters: Array<() => void> = [];
@@ -531,6 +534,7 @@ describe("ClaudeAgentSession context window usage", () => {
 
       void (async () => {
         for await (const _prompt of prompt) {
+          onPrompt?.(_prompt);
           const turnMessages = turns[turnIndex] ?? [];
           turnIndex += 1;
           for (const message of turnMessages) {
@@ -635,6 +639,42 @@ describe("ClaudeAgentSession context window usage", () => {
     await persistedSession.close();
 
     expect(persistedQueryFactory.mock.calls[0]?.[0].options.persistSession).toBe(true);
+  });
+
+  test("steerTurn pushes a priority next user message into the existing input stream", async () => {
+    const capturedPrompts: SDKUserMessage[] = [];
+    const queryFactory = createQueryFactoryForTurns([], (prompt) => {
+      capturedPrompts.push(prompt as SDKUserMessage);
+    });
+    const client = new ClaudeAgentClient({ logger, queryFactory });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+    });
+
+    try {
+      await session.startTurn("first prompt");
+      await vi.waitFor(() => {
+        expect(capturedPrompts).toHaveLength(1);
+      });
+
+      await expect(session.steerTurn?.("steered prompt")).resolves.toBeUndefined();
+
+      await vi.waitFor(() => {
+        expect(capturedPrompts).toHaveLength(2);
+      });
+      expect(capturedPrompts[1]).toMatchObject({
+        type: "user",
+        priority: "next",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "steered prompt" }],
+        },
+      });
+      expect(queryFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      await session.close();
+    }
   });
 
   test("convertUsage includes contextWindowMaxTokens and derives used tokens from result usage as initial fallback", async () => {

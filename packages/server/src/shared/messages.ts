@@ -215,6 +215,7 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z.object({
   supportsMcpServers: z.boolean(),
   supportsReasoningStream: z.boolean(),
   supportsToolInvocations: z.boolean(),
+  supportsSteering: z.boolean().optional().default(false),
 });
 
 const AgentUsageSchema: z.ZodType<AgentUsage> = z.object({

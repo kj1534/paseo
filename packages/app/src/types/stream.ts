@@ -54,6 +54,8 @@ export type StreamItem =
 
 export type UserMessageImageAttachment = AttachmentMetadata;
 
+export type UserMessageDeliveryHint = "steering";
+
 export interface UserMessageItem {
   kind: "user_message";
   id: string;
@@ -61,6 +63,13 @@ export interface UserMessageItem {
   timestamp: Date;
   images?: UserMessageImageAttachment[];
   attachments?: AgentAttachment[];
+  /**
+   * Local-only marker set when this user message was sent optimistically
+   * while the agent was running and the provider supports steering. Never
+   * sent or received over the wire — preserved across canonical replays so
+   * the UI can keep showing the marker.
+   */
+  deliveryHint?: UserMessageDeliveryHint;
 }
 
 export interface AssistantMessageItem {
@@ -204,6 +213,7 @@ function appendUserMessage(
       ? state[existingIndex]
       : null;
   const preservedImages = existing?.images;
+  const preservedDeliveryHint = existing?.deliveryHint;
 
   const nextItem: UserMessageItem = {
     kind: "user_message",
@@ -211,6 +221,7 @@ function appendUserMessage(
     text: chunk,
     timestamp,
     ...(preservedImages && preservedImages.length > 0 ? { images: preservedImages } : {}),
+    ...(preservedDeliveryHint ? { deliveryHint: preservedDeliveryHint } : {}),
   };
 
   if (existingIndex >= 0) {

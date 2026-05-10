@@ -5,13 +5,18 @@ import type { AgentManager } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 
+export type AgentRunController = Pick<
+  AgentManager,
+  "tryRunOutOfBand" | "hasInFlightRun" | "replaceAgentRun" | "streamAgent"
+>;
+
 export interface StartAgentRunOptions {
   replaceRunning?: boolean;
   runOptions?: AgentRunOptions;
 }
 
 export function startAgentRun(
-  agentManager: AgentManager,
+  agentManager: AgentRunController,
   agentId: string,
   prompt: AgentPromptInput,
   logger: Logger,

@@ -65,6 +65,7 @@ import {
   waitForAgentWithTimeout,
 } from "./mcp-shared.js";
 import { sendPromptToAgent, setupFinishNotification, startAgentRun } from "./agent-prompt.js";
+import { respondToAgentPermission } from "./permission-response.js";
 import type { GitHubService } from "../../services/github-service.js";
 import type { WorkspaceGitService } from "../workspace-git-service.js";
 import type { CreatePaseoWorktreeInput } from "../paseo-worktree-service.js";
@@ -2086,7 +2087,13 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       },
     },
     async ({ agentId, requestId, response }) => {
-      await agentManager.respondToPermission(agentId, requestId, response);
+      await respondToAgentPermission({
+        agentManager,
+        agentId,
+        requestId,
+        response,
+        logger: childLogger,
+      });
       return {
         content: [],
         structuredContent: ensureValidJson({ success: true }),

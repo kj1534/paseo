@@ -24,10 +24,6 @@ import { selectItemsByProjectedLimit } from "./timeline-projection.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../persistence-hooks.js";
-import {
-  appendTimelineItemIfAgentKnown,
-  emitLiveTimelineItemIfAgentKnown,
-} from "./timeline-append.js";
 import { getPaseoWorktreesRoot } from "../../utils/worktree.js";
 import {
   archivePaseoWorktree,
@@ -35,13 +31,11 @@ import {
   type ArchivePaseoWorktreeDependencies,
 } from "../paseo-worktree-archive-service.js";
 import { WaitForAgentTracker } from "./wait-for-agent-tracker.js";
-import { scheduleAgentMetadataGeneration } from "./agent-metadata-generator.js";
+import { createAgentCommand } from "./create-agent/create.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "../voice-types.js";
 import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../path-utils.js";
-import { PARENT_AGENT_ID_LABEL } from "../../shared/agent-labels.js";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import type {
-  AgentWorktreeSetupContinuation,
   CreatePaseoWorktreeSetupContinuationInput,
   CreatePaseoWorktreeWorkflowFn,
   CreatePaseoWorktreeWorkflowResult,
@@ -49,8 +43,6 @@ import type {
 import type { ScheduleService } from "../schedule/service.js";
 import { ScheduleSummarySchema, StoredScheduleSchema } from "../schedule/types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
-import { getAgentProviderDefinition } from "./provider-manifest.js";
-import { resolveAndValidateCreateAgentMode } from "./create-agent-mode.js";
 import { resolveSnapshotCwd } from "./provider-snapshot-manager.js";
 import {
   AgentModelSchema,
@@ -64,7 +56,7 @@ import {
   toScheduleSummary,
   waitForAgentWithTimeout,
 } from "./mcp-shared.js";
-import { sendPromptToAgent, setupFinishNotification, startAgentRun } from "./agent-prompt.js";
+import { sendPromptToAgent, setupFinishNotification } from "./agent-prompt.js";
 import { respondToAgentPermission } from "./permission-response.js";
 import type { GitHubService } from "../../services/github-service.js";
 import type { WorkspaceGitService } from "../workspace-git-service.js";
@@ -580,6 +572,7 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
   const createAgentInputSchema = callerAgentId ? agentToAgentInputSchema : topLevelInputSchema;
   const agentToAgentCreateAgentArgsSchema = z.object(agentToAgentInputSchema).strict();
   const topLevelCreateAgentArgsSchema = z.object(topLevelInputSchema).strict();
+  type TopLevelCreateAgentArgs = z.infer<typeof topLevelCreateAgentArgsSchema>;
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     server.registerTool(
@@ -624,163 +617,6 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
     return server;
   }
 
-  interface ResolvedCreateAgentArgs {
-    provider: AgentProvider;
-    initialPrompt: string;
-    background: boolean;
-    normalizedTitle: string | null;
-    model: string | undefined;
-    thinking: string | undefined;
-    labels: Record<string, string> | undefined;
-    notifyOnFinish: boolean;
-    resolvedCwd: string;
-    resolvedMode: string | undefined;
-    setupContinuation: AgentWorktreeSetupContinuation | undefined;
-  }
-
-  const getProviderModes = (provider: AgentProvider) => {
-    const fromRegistry = providerRegistry?.[provider];
-    if (fromRegistry) {
-      return fromRegistry.modes;
-    }
-    try {
-      return getAgentProviderDefinition(provider).modes;
-    } catch {
-      return undefined;
-    }
-  };
-
-  const getAvailableModeIds = (provider: AgentProvider): string[] | undefined => {
-    return getProviderModes(provider)?.map((mode) => mode.id);
-  };
-
-  const getUnattendedModeId = (provider: AgentProvider): string | undefined => {
-    return getProviderModes(provider)?.find((mode) => mode.isUnattended)?.id;
-  };
-
-  const isParentInUnattendedMode = (provider: AgentProvider, modeId: string | null): boolean => {
-    if (modeId === null) return false;
-    const modes = getProviderModes(provider);
-    if (!modes) return false;
-    return modes.some((mode) => mode.id === modeId && mode.isUnattended === true);
-  };
-
-  const resolveCallerCreateAgentArgs = (
-    args: unknown,
-    parentAgentId: string,
-  ): ResolvedCreateAgentArgs => {
-    const callerArgs = agentToAgentCreateAgentArgsSchema.parse(args);
-    const resolvedProviderModel = resolveRequiredProviderModel(callerArgs.provider);
-    const parentAgent = agentManager.getAgent(parentAgentId);
-    if (!parentAgent) {
-      throw new Error(`Parent agent ${parentAgentId} not found`);
-    }
-    const provider = resolvedProviderModel.provider;
-    const resolvedCwd = resolveChildAgentCwd({
-      parentCwd: parentAgent.cwd,
-      requestedCwd: callerArgs.cwd,
-      lockedCwd: callerContext?.lockedCwd,
-      allowCustomCwd: callerContext?.allowCustomCwd ?? true,
-    });
-    const resolvedMode = resolveAndValidateCreateAgentMode({
-      requestedMode: callerArgs.mode,
-      targetProvider: provider,
-      parent: {
-        provider: parentAgent.provider,
-        modeId: parentAgent.currentModeId,
-        isUnattended: isParentInUnattendedMode(parentAgent.provider, parentAgent.currentModeId),
-      },
-      availableModes: getAvailableModeIds(provider),
-      targetUnattendedMode: getUnattendedModeId(provider),
-    });
-    return {
-      provider,
-      initialPrompt: callerArgs.initialPrompt,
-      background: callerArgs.background ?? false,
-      normalizedTitle: callerArgs.title.trim(),
-      model: resolvedProviderModel.model,
-      thinking: callerArgs.thinking,
-      labels: callerArgs.labels,
-      notifyOnFinish: callerArgs.notifyOnFinish ?? false,
-      resolvedCwd,
-      resolvedMode,
-      setupContinuation: undefined,
-    };
-  };
-
-  const resolveTopLevelCreateAgentArgs = async (
-    args: unknown,
-  ): Promise<ResolvedCreateAgentArgs> => {
-    const topLevelArgs = topLevelCreateAgentArgsSchema.parse(args);
-    const resolvedProviderModel = resolveRequiredProviderModel(topLevelArgs.provider);
-    const { cwd, mode, worktreeName, baseBranch, refName, action, githubPrNumber } = topLevelArgs;
-    const resolvedMode = resolveAndValidateCreateAgentMode({
-      requestedMode: mode,
-      targetProvider: resolvedProviderModel.provider,
-      parent: null,
-      availableModes: getAvailableModeIds(resolvedProviderModel.provider),
-      targetUnattendedMode: getUnattendedModeId(resolvedProviderModel.provider),
-    });
-    let resolvedCwd = expandUserPath(cwd);
-    let setupContinuation: AgentWorktreeSetupContinuation | undefined;
-
-    const shouldCreateWorktree = Boolean(worktreeName || refName || action || githubPrNumber);
-    if (shouldCreateWorktree) {
-      if (worktreeName && !baseBranch && !refName && !action && githubPrNumber === undefined) {
-        throw new Error("baseBranch is required when creating a worktree");
-      }
-      const createdWorktree = await createMcpWorktree({
-        input: {
-          cwd: resolvedCwd,
-          worktreeSlug: worktreeName,
-          refName,
-          action,
-          githubPrNumber,
-          ...(topLevelArgs.initialPrompt
-            ? { firstAgentContext: { prompt: topLevelArgs.initialPrompt } }
-            : {}),
-          runSetup: false,
-          paseoHome: options.paseoHome,
-        },
-        createPaseoWorktree: options.createPaseoWorktree,
-        resolveDefaultBranch: baseBranch ? async () => baseBranch : undefined,
-        setupContinuation: {
-          kind: "agent",
-          terminalManager: terminalManager ?? null,
-          appendTimelineItem: ({ agentId, item }) =>
-            appendTimelineItemIfAgentKnown({
-              agentManager,
-              agentId,
-              item,
-            }),
-          emitLiveTimelineItem: ({ agentId, item }) =>
-            emitLiveTimelineItemIfAgentKnown({
-              agentManager,
-              agentId,
-              item,
-            }),
-          logger: childLogger,
-        },
-      });
-      resolvedCwd = createdWorktree.worktree.worktreePath;
-      setupContinuation = createdWorktree.setupContinuation;
-    }
-
-    return {
-      provider: resolvedProviderModel.provider,
-      initialPrompt: topLevelArgs.initialPrompt,
-      background: topLevelArgs.background ?? false,
-      normalizedTitle: topLevelArgs.title.trim(),
-      model: resolvedProviderModel.model,
-      thinking: topLevelArgs.thinking,
-      labels: topLevelArgs.labels,
-      notifyOnFinish: topLevelArgs.notifyOnFinish ?? false,
-      resolvedCwd,
-      resolvedMode,
-      setupContinuation,
-    };
-  };
-
   server.registerTool(
     "create_agent",
     {
@@ -806,87 +642,44 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       },
     },
     async (args: unknown) => {
-      const resolved = callerAgentId
-        ? resolveCallerCreateAgentArgs(args, callerAgentId)
-        : await resolveTopLevelCreateAgentArgs(args);
-      const {
-        provider,
-        initialPrompt,
-        background,
-        normalizedTitle,
-        model,
-        thinking,
-        labels,
-        notifyOnFinish,
-        resolvedCwd,
-        resolvedMode,
-        setupContinuation,
-      } = resolved;
-
-      const childAgentDefaultLabels = callerContext?.childAgentDefaultLabels;
-      const mergedLabels = {
-        ...(callerAgentId ? { [PARENT_AGENT_ID_LABEL]: callerAgentId } : {}),
-        ...childAgentDefaultLabels,
-        ...labels,
-      };
-      const snapshot = await agentManager.createAgent(
+      const { parsedArgs, worktree } = resolveCreateAgentToolArgs(args);
+      const { snapshot, background, initialPromptStarted } = await createAgentCommand(
         {
-          provider,
-          cwd: resolvedCwd,
-          modeId: resolvedMode,
-          title: normalizedTitle ?? undefined,
-          model,
-          thinkingOptionId: thinking,
+          agentManager,
+          agentStorage,
+          logger: childLogger,
+          paseoHome: options.paseoHome,
+          workspaceGitService: options.workspaceGitService,
+          terminalManager,
+          providerRegistry,
+          createPaseoWorktree: options.createPaseoWorktree,
         },
-        undefined,
-        Object.keys(mergedLabels).length > 0 ? { labels: mergedLabels } : undefined,
+        {
+          kind: "mcp",
+          provider: parsedArgs.provider,
+          title: parsedArgs.title,
+          initialPrompt: parsedArgs.initialPrompt,
+          cwd: parsedArgs.cwd,
+          thinking: parsedArgs.thinking,
+          labels: parsedArgs.labels,
+          mode: parsedArgs.mode,
+          background: parsedArgs.background ?? false,
+          notifyOnFinish: parsedArgs.notifyOnFinish ?? false,
+          callerAgentId,
+          callerContext,
+          worktree,
+        },
       );
 
-      setupContinuation?.startAfterAgentCreate({
-        agentId: snapshot.id,
-      });
-
-      const trimmedPrompt = initialPrompt.trim();
-      scheduleAgentMetadataGeneration({
-        agentManager,
-        agentId: snapshot.id,
-        cwd: snapshot.cwd,
-        workspaceGitService: options.workspaceGitService,
-        initialPrompt: trimmedPrompt,
-        explicitTitle: snapshot.config.title,
-        paseoHome: options.paseoHome,
-        logger: childLogger,
-      });
-
       try {
-        agentManager.recordUserMessage(snapshot.id, trimmedPrompt, {
-          emitState: false,
-        });
-      } catch (error) {
-        childLogger.error({ err: error, agentId: snapshot.id }, "Failed to record initial prompt");
-      }
-
-      try {
-        startAgentRun(agentManager, snapshot.id, trimmedPrompt, childLogger);
-        if (notifyOnFinish && callerAgentId) {
-          setupFinishNotification({
-            agentManager,
-            agentStorage,
-            childAgentId: snapshot.id,
-            callerAgentId,
-            logger: childLogger,
-          });
-        }
-
-        // If not running in background, wait for completion
-        if (!background) {
+        if (!background && initialPromptStarted) {
           const result = await waitForAgentWithTimeout(agentManager, snapshot.id, {
             waitForActive: true,
           });
 
           const responseData = {
             agentId: snapshot.id,
-            type: provider,
+            type: snapshot.provider,
             status: result.status,
             cwd: snapshot.cwd,
             currentModeId: snapshot.currentModeId,
@@ -911,7 +704,7 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
         content: [],
         structuredContent: ensureValidJson({
           agentId: snapshot.id,
-          type: provider,
+          type: snapshot.provider,
           status: snapshot.lifecycle,
           cwd: snapshot.cwd,
           currentModeId: snapshot.currentModeId,
@@ -923,6 +716,43 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       return response;
     },
   );
+
+  function resolveCreateAgentToolArgs(args: unknown): {
+    parsedArgs:
+      | z.infer<typeof agentToAgentCreateAgentArgsSchema>
+      | z.infer<typeof topLevelCreateAgentArgsSchema>;
+    worktree: ReturnType<typeof resolveTopLevelCreateAgentWorktree>;
+  } {
+    if (callerAgentId) {
+      return {
+        parsedArgs: agentToAgentCreateAgentArgsSchema.parse(args),
+        worktree: undefined,
+      };
+    }
+    const parsedArgs = topLevelCreateAgentArgsSchema.parse(args);
+    return {
+      parsedArgs,
+      worktree: resolveTopLevelCreateAgentWorktree(parsedArgs),
+    };
+  }
+
+  function resolveTopLevelCreateAgentWorktree(args: TopLevelCreateAgentArgs):
+    | {
+        worktreeName?: string;
+        baseBranch?: string;
+        refName?: string;
+        action?: "branch-off" | "checkout";
+        githubPrNumber?: number;
+      }
+    | undefined {
+    return {
+      worktreeName: args.worktreeName,
+      baseBranch: args.baseBranch,
+      refName: args.refName,
+      action: args.action,
+      githubPrNumber: args.githubPrNumber,
+    };
+  }
 
   server.registerTool(
     "wait_for_agent",
@@ -1296,22 +1126,10 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
     },
     async ({ agentId, name, labels }) => {
       const trimmedName = name?.trim();
-      if (trimmedName) {
-        const record = await agentStorage.get(agentId);
-        if (!record) {
-          throw new Error(`Agent ${agentId} not found`);
-        }
-        await agentStorage.upsert({
-          ...record,
-          title: trimmedName,
-          updatedAt: new Date().toISOString(),
-        });
-        agentManager.notifyAgentState(agentId);
-      }
-
-      if (labels) {
-        await agentManager.setLabels(agentId, labels);
-      }
+      await agentManager.updateAgentMetadata(agentId, {
+        ...(trimmedName ? { title: trimmedName } : {}),
+        ...(labels ? { labels } : {}),
+      });
 
       return {
         content: [],

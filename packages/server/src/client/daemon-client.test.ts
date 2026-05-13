@@ -1586,6 +1586,107 @@ test("requests checkout merge from base via RPC", async () => {
   });
 });
 
+test("requests PR auto-merge enable via RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const promise = client.checkoutPrAutoMergeEnable(
+    "/tmp/project",
+    { method: "squash" },
+    "req-enable-auto-merge",
+  );
+
+  expect(mock.sent).toHaveLength(1);
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request.type).toBe("checkout_pr_auto_merge_enable_request");
+  expect(request.cwd).toBe("/tmp/project");
+  expect(request.mergeMethod).toBe("squash");
+  expect(request.requestId).toBe("req-enable-auto-merge");
+
+  mock.triggerMessage(
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "checkout_pr_auto_merge_enable_response",
+        payload: {
+          cwd: "/tmp/project",
+          requestId: "req-enable-auto-merge",
+          success: true,
+          error: null,
+        },
+      },
+    }),
+  );
+
+  await expect(promise).resolves.toEqual({
+    cwd: "/tmp/project",
+    requestId: "req-enable-auto-merge",
+    success: true,
+    error: null,
+  });
+});
+
+test("requests PR auto-merge disable via RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const promise = client.checkoutPrAutoMergeDisable("/tmp/project", "req-disable-auto-merge");
+
+  expect(mock.sent).toHaveLength(1);
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request.type).toBe("checkout_pr_auto_merge_disable_request");
+  expect(request.cwd).toBe("/tmp/project");
+  expect(request.requestId).toBe("req-disable-auto-merge");
+
+  mock.triggerMessage(
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "checkout_pr_auto_merge_disable_response",
+        payload: {
+          cwd: "/tmp/project",
+          requestId: "req-disable-auto-merge",
+          success: true,
+          error: null,
+        },
+      },
+    }),
+  );
+
+  await expect(promise).resolves.toEqual({
+    cwd: "/tmp/project",
+    requestId: "req-disable-auto-merge",
+    success: true,
+    error: null,
+  });
+});
+
 test("requests checkout pull via RPC", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

@@ -32,6 +32,8 @@ import type {
   CheckoutPrCreateResponse,
   CheckoutPrMergeResponse,
   CheckoutPrMergeMethod,
+  CheckoutPrAutoMergeEnableResponse,
+  CheckoutPrAutoMergeDisableResponse,
   CheckoutPrStatusResponse,
   PullRequestTimelineResponse,
   CheckoutSwitchBranchResponse,
@@ -274,6 +276,8 @@ type CheckoutPullPayload = CheckoutPullResponse["payload"];
 type CheckoutPushPayload = CheckoutPushResponse["payload"];
 type CheckoutPrCreatePayload = CheckoutPrCreateResponse["payload"];
 type CheckoutPrMergePayload = CheckoutPrMergeResponse["payload"];
+type CheckoutPrAutoMergeEnablePayload = CheckoutPrAutoMergeEnableResponse["payload"];
+type CheckoutPrAutoMergeDisablePayload = CheckoutPrAutoMergeDisableResponse["payload"];
 type CheckoutPrStatusPayload = CheckoutPrStatusResponse["payload"];
 type PullRequestTimelinePayload = PullRequestTimelineResponse["payload"];
 type CheckoutSwitchBranchPayload = CheckoutSwitchBranchResponse["payload"];
@@ -2813,6 +2817,38 @@ export class DaemonClient {
         mergeMethod: input.method,
       },
       responseType: "checkout_pr_merge_response",
+      timeout: 60000,
+    });
+  }
+
+  async checkoutPrAutoMergeEnable(
+    cwd: string,
+    input: { method: CheckoutPrMergeMethod },
+    requestId?: string,
+  ): Promise<CheckoutPrAutoMergeEnablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "checkout_pr_auto_merge_enable_request",
+        cwd,
+        mergeMethod: input.method,
+      },
+      responseType: "checkout_pr_auto_merge_enable_response",
+      timeout: 60000,
+    });
+  }
+
+  async checkoutPrAutoMergeDisable(
+    cwd: string,
+    requestId?: string,
+  ): Promise<CheckoutPrAutoMergeDisablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "checkout_pr_auto_merge_disable_request",
+        cwd,
+      },
+      responseType: "checkout_pr_auto_merge_disable_response",
       timeout: 60000,
     });
   }

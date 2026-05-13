@@ -2246,7 +2246,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     id: z.string(),
     projectId: z.string(),
     projectDisplayName: z.string(),
-    // COMPAT(projectCustomName): added in v0.1.65, drop the optional gate when floor >= v0.1.65.
+    // COMPAT(projectCustomName): added in v0.1.76, drop the optional gate when floor >= v0.1.76.
     // When the user has renamed a project, projectDisplayName carries the resolved
     // value (customName) and projectCustomName mirrors the raw override so the
     // settings UI can prefill its input and offer a "reset" action.

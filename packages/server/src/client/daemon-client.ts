@@ -1917,6 +1917,38 @@ export class DaemonClient {
     }
   }
 
+  async renameProject(
+    projectId: string,
+    customName: string | null,
+  ): Promise<{ customName: string | null }> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "rename_project_request",
+      projectId,
+      customName,
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: 10000,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "rename_project_response") {
+          return null;
+        }
+        if (msg.payload.requestId !== requestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "renameProject rejected");
+    }
+    return { customName: payload.customName };
+  }
+
   async resumeAgent(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,

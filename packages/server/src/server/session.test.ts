@@ -65,8 +65,7 @@ interface SessionHandlerInternals {
   handleCheckoutCommitRequest(params: unknown): Promise<unknown>;
   handleCheckoutPrCreateRequest(params: unknown): Promise<unknown>;
   handleCheckoutPrMergeRequest(params: unknown): Promise<unknown>;
-  handleCheckoutPrAutoMergeEnableRequest(params: unknown): Promise<unknown>;
-  handleCheckoutPrAutoMergeDisableRequest(params: unknown): Promise<unknown>;
+  handleCheckoutGithubSetAutoMergeRequest(params: unknown): Promise<unknown>;
   handleCheckoutPullRequest(params: unknown): Promise<unknown>;
   handleCheckoutPushRequest(params: unknown): Promise<unknown>;
   handleCheckoutStatusRequest(params: unknown): Promise<unknown>;
@@ -2272,9 +2271,10 @@ describe("session checkout pull request auto-merge", () => {
     };
     const session = createSessionForTest({ github, workspaceGitService, messages });
 
-    await asSessionInternals(session).handleCheckoutPrAutoMergeEnableRequest({
-      type: "checkout_pr_auto_merge_enable_request",
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
       cwd: "/tmp/request-worktree",
+      enabled: true,
       mergeMethod: "squash",
       requestId: "request-pr-auto-merge-enable",
     });
@@ -2300,9 +2300,10 @@ describe("session checkout pull request auto-merge", () => {
     });
     expect(github.invalidate).toHaveBeenCalledWith({ cwd: "/tmp/request-worktree" });
     expect(messages).toContainEqual({
-      type: "checkout_pr_auto_merge_enable_response",
+      type: "checkout.github.set_auto_merge.response",
       payload: {
         cwd: "/tmp/request-worktree",
+        enabled: true,
         success: true,
         error: null,
         requestId: "request-pr-auto-merge-enable",
@@ -2336,9 +2337,10 @@ describe("session checkout pull request auto-merge", () => {
     };
     const session = createSessionForTest({ github, workspaceGitService, messages });
 
-    await asSessionInternals(session).handleCheckoutPrAutoMergeDisableRequest({
-      type: "checkout_pr_auto_merge_disable_request",
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
       cwd: "/tmp/request-worktree",
+      enabled: false,
       requestId: "request-pr-auto-merge-disable",
     });
 
@@ -2369,9 +2371,10 @@ describe("session checkout pull request auto-merge", () => {
     });
     expect(github.invalidate).toHaveBeenCalledWith({ cwd: "/tmp/request-worktree" });
     expect(messages).toContainEqual({
-      type: "checkout_pr_auto_merge_disable_response",
+      type: "checkout.github.set_auto_merge.response",
       payload: {
         cwd: "/tmp/request-worktree",
+        enabled: false,
         success: true,
         error: null,
         requestId: "request-pr-auto-merge-disable",
@@ -2397,17 +2400,19 @@ describe("session checkout pull request auto-merge", () => {
     };
     const session = createSessionForTest({ github, workspaceGitService, messages });
 
-    await asSessionInternals(session).handleCheckoutPrAutoMergeEnableRequest({
-      type: "checkout_pr_auto_merge_enable_request",
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
       cwd: "/tmp/request-worktree",
+      enabled: true,
       mergeMethod: "merge",
       requestId: "request-pr-auto-merge-failure",
     });
 
     expect(messages).toContainEqual({
-      type: "checkout_pr_auto_merge_enable_response",
+      type: "checkout.github.set_auto_merge.response",
       payload: {
         cwd: "/tmp/request-worktree",
+        enabled: true,
         success: false,
         error: {
           code: "UNKNOWN",
@@ -2444,9 +2449,10 @@ describe("session checkout pull request auto-merge", () => {
     };
     const session = createSessionForTest({ github, workspaceGitService, messages });
 
-    await asSessionInternals(session).handleCheckoutPrAutoMergeEnableRequest({
-      type: "checkout_pr_auto_merge_enable_request",
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
       cwd: "/tmp/request-worktree",
+      enabled: true,
       mergeMethod: "squash",
       requestId: "request-pr-auto-merge-method-disabled",
     });
@@ -2459,9 +2465,10 @@ describe("session checkout pull request auto-merge", () => {
       reason: "auto-merge-validation",
     });
     expect(messages).toContainEqual({
-      type: "checkout_pr_auto_merge_enable_response",
+      type: "checkout.github.set_auto_merge.response",
       payload: {
         cwd: "/tmp/request-worktree",
+        enabled: true,
         success: false,
         error: {
           code: "UNKNOWN",
@@ -2498,9 +2505,10 @@ describe("session checkout pull request auto-merge", () => {
     };
     const session = createSessionForTest({ github, workspaceGitService, messages });
 
-    await asSessionInternals(session).handleCheckoutPrAutoMergeDisableRequest({
-      type: "checkout_pr_auto_merge_disable_request",
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
       cwd: "/tmp/request-worktree",
+      enabled: false,
       requestId: "request-pr-auto-merge-disable-forbidden",
     });
 
@@ -2512,15 +2520,67 @@ describe("session checkout pull request auto-merge", () => {
       reason: "auto-merge-validation",
     });
     expect(messages).toContainEqual({
-      type: "checkout_pr_auto_merge_disable_response",
+      type: "checkout.github.set_auto_merge.response",
       payload: {
         cwd: "/tmp/request-worktree",
+        enabled: false,
         success: false,
         error: {
           code: "UNKNOWN",
           message: "GitHub does not allow this viewer to disable auto-merge",
         },
         requestId: "request-pr-auto-merge-disable-forbidden",
+      },
+    });
+  });
+
+  test("rejects auto-merge disable requests that include a merge method", async () => {
+    const messages: unknown[] = [];
+    const github = {
+      invalidate: vi.fn(),
+      disablePullRequestAutoMerge: vi.fn().mockResolvedValue({ success: true }),
+    };
+    const workspaceGitService = {
+      getSnapshot: vi.fn().mockResolvedValue({
+        github: {
+          pullRequest: {
+            number: 42,
+            github: autoMergeGithubFacts({
+              autoMergeRequest: {
+                enabledAt: "2026-05-13T17:00:00Z",
+                mergeMethod: "SQUASH",
+                enabledBy: "moboudra",
+              },
+              viewerCanEnableAutoMerge: false,
+              viewerCanDisableAutoMerge: true,
+            }),
+          },
+        },
+      }),
+    };
+    const session = createSessionForTest({ github, workspaceGitService, messages });
+
+    await asSessionInternals(session).handleCheckoutGithubSetAutoMergeRequest({
+      type: "checkout.github.set_auto_merge.request",
+      cwd: "/tmp/request-worktree",
+      enabled: false,
+      mergeMethod: "squash",
+      requestId: "request-pr-auto-merge-disable-with-method",
+    });
+
+    expect(github.disablePullRequestAutoMerge).not.toHaveBeenCalled();
+    expect(github.invalidate).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({
+      type: "checkout.github.set_auto_merge.response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        enabled: false,
+        success: false,
+        error: {
+          code: "UNKNOWN",
+          message: "mergeMethod is not allowed when disabling auto-merge",
+        },
+        requestId: "request-pr-auto-merge-disable-with-method",
       },
     });
   });

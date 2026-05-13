@@ -276,7 +276,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
   const runMergeFromBase = useCheckoutGitActionsStore((s) => s.mergeFromBase);
   const runArchiveWorktree = useCheckoutGitActionsStore((s) => s.archiveWorktree);
   const githubAutoMergeActionsEnabled = useSessionStore(
-    (s) => s.sessions[serverId]?.serverInfo?.features?.githubAutoMergeActions === true,
+    (s) => s.sessions[serverId]?.serverInfo?.features?.checkoutGithubSetAutoMerge === true,
   );
 
   const toastActionError = useCallback(

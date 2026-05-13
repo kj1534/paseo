@@ -1,10 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  CheckoutPrAutoMergeDisableRequestSchema,
-  CheckoutPrAutoMergeDisableResponseSchema,
-  CheckoutPrAutoMergeEnableRequestSchema,
-  CheckoutPrAutoMergeEnableResponseSchema,
+  CheckoutGithubSetAutoMergeRequestSchema,
+  CheckoutGithubSetAutoMergeResponseSchema,
   CheckoutPrMergeRequestSchema,
   CheckoutPrStatusSchema,
   ServerInfoStatusPayloadSchema,
@@ -115,60 +113,59 @@ describe("checkout PR schemas", () => {
   });
 
   test.each(["merge", "squash", "rebase"] as const)(
-    "accepts %s as a PR auto-merge enable method",
+    "accepts %s as a GitHub set-auto-merge enable method",
     (mergeMethod) => {
       expect(
-        CheckoutPrAutoMergeEnableRequestSchema.parse({
-          type: "checkout_pr_auto_merge_enable_request",
+        CheckoutGithubSetAutoMergeRequestSchema.parse({
+          type: "checkout.github.set_auto_merge.request",
           cwd: "/tmp/repo",
+          enabled: true,
           mergeMethod,
           requestId: "request-enable-auto-merge",
         }),
-      ).toMatchObject({ mergeMethod });
+      ).toMatchObject({ enabled: true, mergeMethod });
     },
   );
 
-  test("rejects unknown PR auto-merge enable methods", () => {
+  test("rejects unknown GitHub set-auto-merge enable methods", () => {
     expect(() =>
-      CheckoutPrAutoMergeEnableRequestSchema.parse({
-        type: "checkout_pr_auto_merge_enable_request",
+      CheckoutGithubSetAutoMergeRequestSchema.parse({
+        type: "checkout.github.set_auto_merge.request",
         cwd: "/tmp/repo",
+        enabled: true,
         mergeMethod: "auto",
         requestId: "request-enable-auto-merge",
       }),
     ).toThrow();
   });
 
-  test("accepts PR auto-merge disable requests", () => {
+  test("accepts GitHub set-auto-merge disable requests", () => {
     expect(
-      CheckoutPrAutoMergeDisableRequestSchema.parse({
-        type: "checkout_pr_auto_merge_disable_request",
+      CheckoutGithubSetAutoMergeRequestSchema.parse({
+        type: "checkout.github.set_auto_merge.request",
         cwd: "/tmp/repo",
+        enabled: false,
         requestId: "request-disable-auto-merge",
       }),
     ).toMatchObject({
       cwd: "/tmp/repo",
+      enabled: false,
       requestId: "request-disable-auto-merge",
     });
   });
 
-  test("accepts PR auto-merge mutation responses", () => {
+  test("accepts GitHub set-auto-merge responses", () => {
     const payload = {
       cwd: "/tmp/repo",
+      enabled: true,
       success: true,
       error: null,
       requestId: "request-auto-merge",
     };
 
     expect(
-      CheckoutPrAutoMergeEnableResponseSchema.parse({
-        type: "checkout_pr_auto_merge_enable_response",
-        payload,
-      }).payload,
-    ).toEqual(payload);
-    expect(
-      CheckoutPrAutoMergeDisableResponseSchema.parse({
-        type: "checkout_pr_auto_merge_disable_response",
+      CheckoutGithubSetAutoMergeResponseSchema.parse({
+        type: "checkout.github.set_auto_merge.response",
         payload,
       }).payload,
     ).toEqual(payload);
@@ -181,12 +178,12 @@ describe("checkout PR schemas", () => {
         serverId: "srv_test",
         features: {
           providersSnapshot: true,
-          githubAutoMergeActions: true,
+          checkoutGithubSetAutoMerge: true,
         },
       }).features,
     ).toEqual({
       providersSnapshot: true,
-      githubAutoMergeActions: true,
+      checkoutGithubSetAutoMerge: true,
     });
   });
 });

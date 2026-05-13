@@ -1314,16 +1314,11 @@ export const CheckoutPrMergeRequestSchema = z.object({
   requestId: z.string(),
 });
 
-export const CheckoutPrAutoMergeEnableRequestSchema = z.object({
-  type: z.literal("checkout_pr_auto_merge_enable_request"),
+export const CheckoutGithubSetAutoMergeRequestSchema = z.object({
+  type: z.literal("checkout.github.set_auto_merge.request"),
   cwd: z.string(),
-  mergeMethod: z.enum(["merge", "squash", "rebase"]),
-  requestId: z.string(),
-});
-
-export const CheckoutPrAutoMergeDisableRequestSchema = z.object({
-  type: z.literal("checkout_pr_auto_merge_disable_request"),
-  cwd: z.string(),
+  enabled: z.boolean(),
+  mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
   requestId: z.string(),
 });
 
@@ -1776,8 +1771,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutPushRequestSchema,
   CheckoutPrCreateRequestSchema,
   CheckoutPrMergeRequestSchema,
-  CheckoutPrAutoMergeEnableRequestSchema,
-  CheckoutPrAutoMergeDisableRequestSchema,
+  CheckoutGithubSetAutoMergeRequestSchema,
   CheckoutPrStatusRequestSchema,
   PullRequestTimelineRequestSchema,
   CheckoutSwitchBranchRequestSchema,
@@ -2000,7 +1994,7 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
-        githubAutoMergeActions: z.boolean().optional(),
+        checkoutGithubSetAutoMerge: z.boolean().optional(),
       })
       .optional(),
   })
@@ -2908,20 +2902,11 @@ export const CheckoutPrMergeResponseSchema = z.object({
   }),
 });
 
-export const CheckoutPrAutoMergeEnableResponseSchema = z.object({
-  type: z.literal("checkout_pr_auto_merge_enable_response"),
+export const CheckoutGithubSetAutoMergeResponseSchema = z.object({
+  type: z.literal("checkout.github.set_auto_merge.response"),
   payload: z.object({
     cwd: z.string(),
-    success: z.boolean(),
-    error: CheckoutErrorSchema.nullable(),
-    requestId: z.string(),
-  }),
-});
-
-export const CheckoutPrAutoMergeDisableResponseSchema = z.object({
-  type: z.literal("checkout_pr_auto_merge_disable_response"),
-  payload: z.object({
-    cwd: z.string(),
+    enabled: z.boolean(),
     success: z.boolean(),
     error: CheckoutErrorSchema.nullable(),
     requestId: z.string(),
@@ -3486,8 +3471,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutPushResponseSchema,
   CheckoutPrCreateResponseSchema,
   CheckoutPrMergeResponseSchema,
-  CheckoutPrAutoMergeEnableResponseSchema,
-  CheckoutPrAutoMergeDisableResponseSchema,
+  CheckoutGithubSetAutoMergeResponseSchema,
   CheckoutPrStatusResponseSchema,
   PullRequestTimelineResponseSchema,
   CheckoutSwitchBranchResponseSchema,
@@ -3744,17 +3728,11 @@ export type CheckoutPrCreateResponse = z.infer<typeof CheckoutPrCreateResponseSc
 export type CheckoutPrMergeRequest = z.infer<typeof CheckoutPrMergeRequestSchema>;
 export type CheckoutPrMergeResponse = z.infer<typeof CheckoutPrMergeResponseSchema>;
 export type CheckoutPrMergeMethod = z.infer<typeof CheckoutPrMergeRequestSchema>["mergeMethod"];
-export type CheckoutPrAutoMergeEnableRequest = z.infer<
-  typeof CheckoutPrAutoMergeEnableRequestSchema
+export type CheckoutGithubSetAutoMergeRequest = z.infer<
+  typeof CheckoutGithubSetAutoMergeRequestSchema
 >;
-export type CheckoutPrAutoMergeEnableResponse = z.infer<
-  typeof CheckoutPrAutoMergeEnableResponseSchema
->;
-export type CheckoutPrAutoMergeDisableRequest = z.infer<
-  typeof CheckoutPrAutoMergeDisableRequestSchema
->;
-export type CheckoutPrAutoMergeDisableResponse = z.infer<
-  typeof CheckoutPrAutoMergeDisableResponseSchema
+export type CheckoutGithubSetAutoMergeResponse = z.infer<
+  typeof CheckoutGithubSetAutoMergeResponseSchema
 >;
 export type PullRequestMergeable = z.infer<typeof CheckoutPrStatusSchema>["mergeable"];
 export type CheckoutPrStatusRequest = z.infer<typeof CheckoutPrStatusRequestSchema>;

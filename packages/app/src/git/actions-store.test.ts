@@ -172,21 +172,28 @@ describe("checkout-git-actions-store", () => {
 
   it("enables PR auto-merge when the daemon advertises auto-merge actions", async () => {
     const client = {
-      checkoutPrAutoMergeEnable: vi.fn(async () => ({ success: true, error: null })),
+      checkoutGithubSetAutoMerge: vi.fn(async () => ({
+        enabled: true,
+        success: true,
+        error: null,
+      })),
     };
     useSessionStore.getState().initializeSession(serverId, client as unknown as DaemonClient);
     useSessionStore.getState().updateSessionServerInfo(serverId, {
       serverId,
       hostname: null,
       version: null,
-      features: { githubAutoMergeActions: true },
+      features: { checkoutGithubSetAutoMerge: true },
     });
 
     await useCheckoutGitActionsStore
       .getState()
       .enablePrAutoMerge({ serverId, cwd, method: "squash" });
 
-    expect(client.checkoutPrAutoMergeEnable).toHaveBeenCalledWith(cwd, { method: "squash" });
+    expect(client.checkoutGithubSetAutoMerge).toHaveBeenCalledWith(cwd, {
+      enabled: true,
+      method: "squash",
+    });
     expect(
       useCheckoutGitActionsStore
         .getState()
@@ -196,19 +203,23 @@ describe("checkout-git-actions-store", () => {
 
   it("disables PR auto-merge when the daemon advertises auto-merge actions", async () => {
     const client = {
-      checkoutPrAutoMergeDisable: vi.fn(async () => ({ success: true, error: null })),
+      checkoutGithubSetAutoMerge: vi.fn(async () => ({
+        enabled: false,
+        success: true,
+        error: null,
+      })),
     };
     useSessionStore.getState().initializeSession(serverId, client as unknown as DaemonClient);
     useSessionStore.getState().updateSessionServerInfo(serverId, {
       serverId,
       hostname: null,
       version: null,
-      features: { githubAutoMergeActions: true },
+      features: { checkoutGithubSetAutoMerge: true },
     });
 
     await useCheckoutGitActionsStore.getState().disablePrAutoMerge({ serverId, cwd });
 
-    expect(client.checkoutPrAutoMergeDisable).toHaveBeenCalledWith(cwd);
+    expect(client.checkoutGithubSetAutoMerge).toHaveBeenCalledWith(cwd, { enabled: false });
     expect(
       useCheckoutGitActionsStore
         .getState()
@@ -218,7 +229,11 @@ describe("checkout-git-actions-store", () => {
 
   it("does not call PR auto-merge RPCs when the daemon lacks the feature flag", async () => {
     const client = {
-      checkoutPrAutoMergeEnable: vi.fn(async () => ({ success: true, error: null })),
+      checkoutGithubSetAutoMerge: vi.fn(async () => ({
+        enabled: true,
+        success: true,
+        error: null,
+      })),
     };
     useSessionStore.getState().initializeSession(serverId, client as unknown as DaemonClient);
     useSessionStore.getState().updateSessionServerInfo(serverId, {
@@ -232,7 +247,7 @@ describe("checkout-git-actions-store", () => {
       useCheckoutGitActionsStore.getState().enablePrAutoMerge({ serverId, cwd, method: "merge" }),
     ).rejects.toThrow("Update the host to use GitHub auto-merge actions.");
 
-    expect(client.checkoutPrAutoMergeEnable).not.toHaveBeenCalled();
+    expect(client.checkoutGithubSetAutoMerge).not.toHaveBeenCalled();
     expect(
       useCheckoutGitActionsStore
         .getState()

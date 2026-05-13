@@ -2027,10 +2027,8 @@ export class Session {
         return this.handleCheckoutPrCreateRequest(msg);
       case "checkout_pr_merge_request":
         return this.handleCheckoutPrMergeRequest(msg);
-      case "checkout_pr_auto_merge_enable_request":
-        return this.handleCheckoutPrAutoMergeEnableRequest(msg);
-      case "checkout_pr_auto_merge_disable_request":
-        return this.handleCheckoutPrAutoMergeDisableRequest(msg);
+      case "checkout.github.set_auto_merge.request":
+        return this.handleCheckoutGithubSetAutoMergeRequest(msg);
       case "checkout_pr_status_request":
         return this.handleCheckoutPrStatusRequest(msg);
       case "pull_request_timeline_request":
@@ -5242,8 +5240,8 @@ export class Session {
     }
   }
 
-  private async handleCheckoutPrAutoMergeEnableRequest(
-    msg: Extract<SessionInboundMessage, { type: "checkout_pr_auto_merge_enable_request" }>,
+  private async handleCheckoutGithubSetAutoMergeRequest(
+    msg: Extract<SessionInboundMessage, { type: "checkout.github.set_auto_merge.request" }>,
   ): Promise<void> {
     const { cwd, requestId } = msg;
 
@@ -5253,22 +5251,45 @@ export class Session {
         includeGitHub: true,
         reason: "auto-merge-validation",
       });
-      assertPullRequestAutoMergeEnableReady({
-        mergeMethod: msg.mergeMethod,
-        status: pullRequest,
-      });
-      await this.github.enablePullRequestAutoMerge({
+      if (msg.enabled) {
+        const mergeMethod = msg.mergeMethod;
+        if (!mergeMethod) {
+          throw new Error("mergeMethod is required when enabling auto-merge");
+        }
+        assertPullRequestAutoMergeEnableReady({
+          mergeMethod,
+          status: pullRequest,
+        });
+        await this.github.enablePullRequestAutoMerge({
+          cwd,
+          prNumber: pullRequest.number,
+          mergeMethod,
+          status: pullRequest,
+        });
+      } else {
+        if (msg.mergeMethod) {
+          throw new Error("mergeMethod is not allowed when disabling auto-merge");
+        }
+        assertPullRequestAutoMergeDisableReady({ status: pullRequest });
+        await this.github.disablePullRequestAutoMerge({
+          cwd,
+          prNumber: pullRequest.number,
+          status: pullRequest,
+        });
+      }
+      await this.notifyGitMutation(
         cwd,
-        prNumber: pullRequest.number,
-        mergeMethod: msg.mergeMethod,
-        status: pullRequest,
-      });
-      await this.notifyGitMutation(cwd, "enable-pr-auto-merge", { invalidateGithub: true });
+        msg.enabled ? "enable-pr-auto-merge" : "disable-pr-auto-merge",
+        {
+          invalidateGithub: true,
+        },
+      );
 
       this.emit({
-        type: "checkout_pr_auto_merge_enable_response",
+        type: "checkout.github.set_auto_merge.response",
         payload: {
           cwd,
+          enabled: msg.enabled,
           success: true,
           error: null,
           requestId,
@@ -5276,50 +5297,10 @@ export class Session {
       });
     } catch (error) {
       this.emit({
-        type: "checkout_pr_auto_merge_enable_response",
+        type: "checkout.github.set_auto_merge.response",
         payload: {
           cwd,
-          success: false,
-          error: toCheckoutError(error),
-          requestId,
-        },
-      });
-    }
-  }
-
-  private async handleCheckoutPrAutoMergeDisableRequest(
-    msg: Extract<SessionInboundMessage, { type: "checkout_pr_auto_merge_disable_request" }>,
-  ): Promise<void> {
-    const { cwd, requestId } = msg;
-
-    try {
-      const pullRequest = await this.resolveCurrentPullRequest(cwd, "auto-merge", {
-        force: true,
-        includeGitHub: true,
-        reason: "auto-merge-validation",
-      });
-      assertPullRequestAutoMergeDisableReady({ status: pullRequest });
-      await this.github.disablePullRequestAutoMerge({
-        cwd,
-        prNumber: pullRequest.number,
-        status: pullRequest,
-      });
-      await this.notifyGitMutation(cwd, "disable-pr-auto-merge", { invalidateGithub: true });
-
-      this.emit({
-        type: "checkout_pr_auto_merge_disable_response",
-        payload: {
-          cwd,
-          success: true,
-          error: null,
-          requestId,
-        },
-      });
-    } catch (error) {
-      this.emit({
-        type: "checkout_pr_auto_merge_disable_response",
-        payload: {
-          cwd,
+          enabled: msg.enabled,
           success: false,
           error: toCheckoutError(error),
           requestId,

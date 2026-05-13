@@ -32,8 +32,7 @@ import type {
   CheckoutPrCreateResponse,
   CheckoutPrMergeResponse,
   CheckoutPrMergeMethod,
-  CheckoutPrAutoMergeEnableResponse,
-  CheckoutPrAutoMergeDisableResponse,
+  CheckoutGithubSetAutoMergeResponse,
   CheckoutPrStatusResponse,
   PullRequestTimelineResponse,
   CheckoutSwitchBranchResponse,
@@ -276,8 +275,7 @@ type CheckoutPullPayload = CheckoutPullResponse["payload"];
 type CheckoutPushPayload = CheckoutPushResponse["payload"];
 type CheckoutPrCreatePayload = CheckoutPrCreateResponse["payload"];
 type CheckoutPrMergePayload = CheckoutPrMergeResponse["payload"];
-type CheckoutPrAutoMergeEnablePayload = CheckoutPrAutoMergeEnableResponse["payload"];
-type CheckoutPrAutoMergeDisablePayload = CheckoutPrAutoMergeDisableResponse["payload"];
+type CheckoutGithubSetAutoMergePayload = CheckoutGithubSetAutoMergeResponse["payload"];
 type CheckoutPrStatusPayload = CheckoutPrStatusResponse["payload"];
 type PullRequestTimelinePayload = PullRequestTimelineResponse["payload"];
 type CheckoutSwitchBranchPayload = CheckoutSwitchBranchResponse["payload"];
@@ -1426,6 +1424,25 @@ export class DaemonClient {
       timeout: params.timeout,
       options: { skipQueue: true },
       ...(params.selectPayload ? { selectPayload: params.selectPayload } : {}),
+    });
+  }
+
+  private sendNamespacedCorrelatedSessionRequest<
+    TResponseType extends CorrelatedResponseType,
+    TResult = CorrelatedResponsePayload<TResponseType>,
+  >(params: {
+    requestId?: string;
+    message: { type: Extract<SessionInboundMessage["type"], `${string}.request`> } & Record<
+      string,
+      unknown
+    >;
+    timeout: number;
+    selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
+  }): Promise<TResult> {
+    const responseType = params.message.type.replace(/\.request$/, ".response") as TResponseType;
+    return this.sendCorrelatedSessionRequest({
+      ...params,
+      responseType,
     });
   }
 
@@ -2821,34 +2838,19 @@ export class DaemonClient {
     });
   }
 
-  async checkoutPrAutoMergeEnable(
+  async checkoutGithubSetAutoMerge(
     cwd: string,
-    input: { method: CheckoutPrMergeMethod },
+    input: { enabled: true; method: CheckoutPrMergeMethod } | { enabled: false },
     requestId?: string,
-  ): Promise<CheckoutPrAutoMergeEnablePayload> {
-    return this.sendCorrelatedSessionRequest({
+  ): Promise<CheckoutGithubSetAutoMergePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"checkout.github.set_auto_merge.response">({
       requestId,
       message: {
-        type: "checkout_pr_auto_merge_enable_request",
+        type: "checkout.github.set_auto_merge.request",
         cwd,
-        mergeMethod: input.method,
+        enabled: input.enabled,
+        ...(input.enabled ? { mergeMethod: input.method } : {}),
       },
-      responseType: "checkout_pr_auto_merge_enable_response",
-      timeout: 60000,
-    });
-  }
-
-  async checkoutPrAutoMergeDisable(
-    cwd: string,
-    requestId?: string,
-  ): Promise<CheckoutPrAutoMergeDisablePayload> {
-    return this.sendCorrelatedSessionRequest({
-      requestId,
-      message: {
-        type: "checkout_pr_auto_merge_disable_request",
-        cwd,
-      },
-      responseType: "checkout_pr_auto_merge_disable_response",
       timeout: 60000,
     });
   }

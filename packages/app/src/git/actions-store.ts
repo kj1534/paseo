@@ -58,7 +58,7 @@ function resolveClient(serverId: string) {
 
 function assertGitHubAutoMergeActionsSupported(serverId: string) {
   const session = useSessionStore.getState().sessions[serverId];
-  if (session?.serverInfo?.features?.githubAutoMergeActions !== true) {
+  if (session?.serverInfo?.features?.checkoutGithubSetAutoMerge !== true) {
     throw new Error("Update the host to use GitHub auto-merge actions.");
   }
 }
@@ -417,7 +417,7 @@ export const useCheckoutGitActionsStore = create<CheckoutGitActionsStoreState>()
       actionId: `enable-pr-auto-merge-${method}`,
       run: async () => {
         const client = resolveClient(serverId);
-        const payload = await client.checkoutPrAutoMergeEnable(cwd, { method });
+        const payload = await client.checkoutGithubSetAutoMerge(cwd, { enabled: true, method });
         if (payload.error) {
           throw new Error(payload.error.message);
         }
@@ -433,7 +433,7 @@ export const useCheckoutGitActionsStore = create<CheckoutGitActionsStoreState>()
       actionId: "disable-pr-auto-merge",
       run: async () => {
         const client = resolveClient(serverId);
-        const payload = await client.checkoutPrAutoMergeDisable(cwd);
+        const payload = await client.checkoutGithubSetAutoMerge(cwd, { enabled: false });
         if (payload.error) {
           throw new Error(payload.error.message);
         }

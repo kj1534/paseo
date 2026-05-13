@@ -424,7 +424,7 @@ describe("WorkspaceGitServiceImpl", () => {
       createSnapshot(REPO_CWD),
     );
 
-    expect(getPullRequestStatus).toHaveBeenCalledTimes(2);
+    expect(getPullRequestStatus).toHaveBeenCalledTimes(3);
     expect(resolveAbsoluteGitDir).toHaveBeenCalledTimes(1);
 
     subscription.unsubscribe();

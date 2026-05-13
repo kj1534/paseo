@@ -221,6 +221,7 @@ export function buildTerminalEnvironment(
 ): Record<string, string> {
   const baseEnv: Record<string, string> = createExternalProcessEnv(process.env, input.env, {
     TERM: "xterm-256color",
+    TERM_PROGRAM: "kitty",
   });
 
   if (basename(input.shell) !== "zsh") {

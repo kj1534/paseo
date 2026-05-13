@@ -22,6 +22,7 @@ import {
 } from "../utils/checkout-git.js";
 import {
   createGitHubService,
+  type GitHubCurrentPullRequestStatus,
   type GitHubService,
   type PullRequestMergeable,
 } from "../services/github-service.js";
@@ -360,11 +361,30 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
     string,
     WorkspaceGitAuxiliaryReadCacheEntry<CheckoutDiffResult>
   >();
+  private pullRequestStatusListener:
+    | ((args: {
+        cwd: string;
+        headRef: string;
+        status: GitHubCurrentPullRequestStatus | null;
+      }) => void)
+    | null = null;
 
   constructor(options: WorkspaceGitServiceOptions) {
     this.logger = options.logger.child({ module: "workspace-git-service" });
     this.paseoHome = options.paseoHome;
     this.deps = resolveWorkspaceGitServiceDeps(options.deps);
+  }
+
+  public setPullRequestStatusListener(
+    listener:
+      | ((args: {
+          cwd: string;
+          headRef: string;
+          status: GitHubCurrentPullRequestStatus | null;
+        }) => void)
+      | null,
+  ): void {
+    this.pullRequestStatusListener = listener;
   }
 
   registerWorkspace(
@@ -1071,9 +1091,19 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
     target.githubPollSubscription = this.deps.github.retainCurrentPullRequestStatusPoll({
       cwd: target.cwd,
       headRef,
-      onStatus: () => {
+      onStatus: (status) => {
         if (!this.isActiveObservedWorkspaceTarget(target)) {
           return;
+        }
+        if (this.pullRequestStatusListener) {
+          try {
+            this.pullRequestStatusListener({ cwd: target.cwd, headRef, status });
+          } catch (error) {
+            this.logger.warn(
+              { err: error, cwd: target.cwd, headRef },
+              "Pull request status listener threw",
+            );
+          }
         }
         void this.refreshWorkspaceTarget(target, {
           force: false,

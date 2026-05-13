@@ -1327,7 +1327,8 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
   ): Promise<WorkspaceGitRuntimeSnapshot> {
     if (target.refreshState.status === "in-flight") {
       const needsForcedRefresh = request.force && !target.refreshState.force;
-      const needsGitHubRefresh = request.includeGitHub && !target.refreshState.includeGitHub;
+      const needsGitHubRefresh =
+        request.force && request.includeGitHub && !target.refreshState.includeGitHub;
       if (needsForcedRefresh || needsGitHubRefresh) {
         target.refreshState.queued = this.mergeQueuedRefresh(target.refreshState.queued, request);
       }

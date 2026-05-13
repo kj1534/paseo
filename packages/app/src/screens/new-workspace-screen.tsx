@@ -39,10 +39,7 @@ import {
   type PickerCheckoutRequest,
   type PickerItem,
 } from "./new-workspace-picker-item";
-import {
-  findCheckoutHintPrAttachment,
-  syncPickerPrAttachment,
-} from "./new-workspace-picker-state";
+import { findCheckoutHintPrAttachment, syncPickerPrAttachment } from "./new-workspace-picker-state";
 
 function resolveCheckoutRequest(
   selectedItem: PickerItem | null,

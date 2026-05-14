@@ -1920,28 +1920,17 @@ export class DaemonClient {
   async renameProject(
     projectId: string,
     customName: string | null,
+    requestId?: string,
   ): Promise<{ customName: string | null }> {
-    const requestId = this.createRequestId();
-    const message = SessionInboundMessageSchema.parse({
-      type: "rename_project_request",
-      projectId,
-      customName,
+    const payload = await this.sendCorrelatedSessionRequest({
       requestId,
-    });
-    const payload = await this.sendRequest({
-      requestId,
-      message,
-      timeout: 10000,
-      options: { skipQueue: true },
-      select: (msg) => {
-        if (msg.type !== "rename_project_response") {
-          return null;
-        }
-        if (msg.payload.requestId !== requestId) {
-          return null;
-        }
-        return msg.payload;
+      message: {
+        type: "rename_project_request",
+        projectId,
+        customName,
       },
+      responseType: "rename_project_response",
+      timeout: 10000,
     });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "renameProject rejected");

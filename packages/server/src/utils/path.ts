@@ -34,7 +34,7 @@ export function areEquivalentPaths(left: string, right: string): boolean {
 
 export function createPathEquivalenceMatcher(target: string): (candidate: string) => boolean {
   const targetLooksWindows = looksLikeDefiniteWindowsPath(target);
-  const compareAsWindows = targetLooksWindows;
+  const compareAsWindows = process.platform === "win32" || targetLooksWindows;
   const normalizedTarget = normalizePathForComparison(target, compareAsWindows);
 
   return (candidate) => {
@@ -82,7 +82,11 @@ function resolveRealpathVariants(value: string): string[] {
 }
 
 function shouldCompareAsWindows(left: string, right: string): boolean {
-  return looksLikeDefiniteWindowsPath(left) || looksLikeDefiniteWindowsPath(right);
+  return (
+    process.platform === "win32" ||
+    looksLikeDefiniteWindowsPath(left) ||
+    looksLikeDefiniteWindowsPath(right)
+  );
 }
 
 function looksLikeDefiniteWindowsPath(value: string): boolean {

@@ -1988,7 +1988,7 @@ test("fetch_recent_provider_sessions_request lists importable provider sessions 
       updatedAt: "2026-04-30T00:00:00.000Z",
       title: "Stored",
       labels: {},
-      lastStatus: "closed",
+      lastStatus: "idle",
       persistence: {
         provider: "codex",
         sessionId: "stored-session",

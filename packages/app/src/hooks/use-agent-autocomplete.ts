@@ -510,7 +510,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
       }
 
       if (selected.type === "command_argument") {
-        setUserInput(`/${selected.commandName} ${selected.argumentValue}`);
+        setUserInput(`/${selected.commandName} ${selected.argumentValue} `);
         onAutocompleteApplied?.();
         return;
       }

@@ -18,5 +18,10 @@ describe("path equivalence", () => {
     expect(
       areEquivalentPaths("/Users/Administrator/GhostFactory", "/users/administrator/ghostfactory"),
     ).toBe(false);
+    expect(
+      createPathEquivalenceMatcher("/Users/Administrator/GhostFactory")(
+        "/users/administrator/ghostfactory",
+      ),
+    ).toBe(false);
   });
 });

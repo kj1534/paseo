@@ -185,7 +185,7 @@ describe("useAgentAutocomplete", () => {
       result.current.onSelectOption(result.current.options[0]!);
     });
 
-    expect(setUserInput).toHaveBeenCalledWith("/tree entry-b");
+    expect(setUserInput).toHaveBeenCalledWith("/tree entry-b ");
     expect(onAutocompleteApplied).toHaveBeenCalledTimes(1);
   });
 

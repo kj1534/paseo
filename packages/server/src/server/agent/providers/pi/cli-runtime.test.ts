@@ -121,6 +121,32 @@ describe("PiCliRuntime", () => {
     ]);
   });
 
+  test("passes extension paths to Pi", async () => {
+    const child = createPiChild();
+    replyToCommands(child, () => ({}));
+    const launches: PiRuntimeLaunch[] = [];
+    const runtime = createRuntime(child, launches);
+
+    await runtime.startSession({
+      cwd: "/workspace/project",
+      extensionPaths: ["/tmp/paseo-pi-extension/paseo-integration.mjs"],
+    });
+
+    expect(launches).toEqual([
+      expect.objectContaining({
+        cwd: "/workspace/project",
+        extensionPaths: ["/tmp/paseo-pi-extension/paseo-integration.mjs"],
+        argv: [
+          "pi",
+          "--mode",
+          "rpc",
+          "--extension",
+          "/tmp/paseo-pi-extension/paseo-integration.mjs",
+        ],
+      }),
+    ]);
+  });
+
   test("passes an appended system prompt to Pi", async () => {
     const child = createPiChild();
     replyToCommands(child, () => ({}));

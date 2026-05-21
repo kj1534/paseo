@@ -26,6 +26,10 @@ Pi import discovery reads Pi's persisted JSONL session files because Pi RPC does
 
 Pi RPC extension UI dialog requests (`select`, `input`, `editor`, `confirm`) are bridged into Paseo question permissions and answered with `extension_ui_response`. Fire-and-forget extension UI requests such as notifications are intentionally ignored by the provider adapter unless Paseo grows first-class UI for them.
 
+Pi tree navigation is exposed to app/web as a provider slash command. `/tree` returns selectable JSONL entries, and `/tree <entryId>` runs out-of-band through a temporary Paseo extension loaded into the Pi RPC process. The extension calls Pi's native `ctx.navigateTree(..., { summarize: false })`, then Paseo rehydrates the timeline and appends a local-only notice.
+
+Selecting a user entry moves Pi to that entry's parent branch point, so the next normal message creates a sibling branch without changing the selected prompt or its existing replies. Selecting an assistant entry continues from that assistant response. Do not expose `/treed` as a one-line command: it is a third-party Pi tree-delete extension whose useful actions are interactive keyboard shortcuts for deleting selected entries. Paseo cannot pass those highlighted-entry actions as command arguments, so users should use `pi resume` in a terminal for `/treed`.
+
 Draft metadata lookups should avoid creating provider sessions when the upstream provider has top-level APIs for that metadata. Prefer `AgentClient.listModels`, `listModes`, `listCommands`, or `listFeatures` over creating a scratch `AgentSession`; scratch sessions can show up as empty native sessions in provider import/history UIs.
 
 ---

@@ -338,7 +338,10 @@ describe("PiRpcAgentSession", () => {
           "high",
           "--session",
           "/tmp/native-pi-session.jsonl",
+          "--extension",
+          expect.any(String),
         ],
+        extensionPaths: [expect.any(String)],
       }),
     ]);
   });
@@ -366,7 +369,10 @@ describe("PiRpcAgentSession", () => {
           "medium",
           "--append-system-prompt",
           "Agent prompt\n\nDaemon prompt",
+          "--extension",
+          expect.any(String),
         ],
+        extensionPaths: [expect.any(String)],
       }),
     );
   });
@@ -409,7 +415,10 @@ describe("PiRpcAgentSession", () => {
           "/tmp/native-pi-session.jsonl",
           "--append-system-prompt",
           "Agent prompt\n\nDaemon prompt",
+          "--extension",
+          expect.any(String),
         ],
+        extensionPaths: [expect.any(String)],
       }),
     ]);
   });
@@ -426,6 +435,24 @@ describe("PiRpcAgentSession", () => {
     expect(fakeSession.setThinkingLevelRequests).toEqual(["high"]);
   });
 
+  test("describes persistence with the latest Pi runtime model and thinking state", async () => {
+    const { pi, session } = await createSession();
+    pi.latestSession().state = {
+      ...pi.latestSession().state,
+      model: { provider: "newapi-code", id: "mimo-v2.5-pro", name: "Mimo" },
+      thinkingLevel: "xhigh",
+    };
+
+    await session.getRuntimeInfo();
+
+    expect(session.describePersistence()).toMatchObject({
+      metadata: {
+        model: "newapi-code/mimo-v2.5-pro",
+        thinkingOptionId: "xhigh",
+      },
+    });
+  });
+
   test("fails the active turn when the Pi process exits mid-turn", async () => {
     const { pi, session, events } = await createSession();
 
@@ -435,6 +462,20 @@ describe("PiRpcAgentSession", () => {
     await expect(events.nextTurnFailure()).resolves.toMatchObject({
       error: "Pi exited",
     });
+  });
+
+  test("defers prompt startup so immediate Pi failures reach foreground waiters", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.promptError = new Error("Model not found");
+
+    await session.startTurn("hello");
+
+    expect(fakeSession.prompts).toEqual([]);
+    await expect(events.nextTurnFailure()).resolves.toMatchObject({
+      error: "Model not found",
+    });
+    expect(fakeSession.prompts).toEqual([{ message: "hello", imageCount: 0 }]);
   });
 });
 
@@ -472,9 +513,116 @@ describe("PiRpcAgentClient", () => {
     ];
 
     await expect(session.listCommands()).resolves.toEqual([
+      expect.objectContaining({ name: "tree", argumentHint: "<entryId>" }),
       { name: "review", description: "Review changes", argumentHint: "" },
       { name: "fix-tests", description: "Fix tests", argumentHint: "" },
       { name: "skill:docs", description: "Read docs", argumentHint: "" },
+    ]);
+  });
+
+  test("adds Paseo tree command and hides internal tree bridge and treed commands", async () => {
+    const { pi, session } = await createSession();
+    const sessionFile = path.join(
+      mkdtempSync(path.join(tmpdir(), "paseo-pi-tree-agent-")),
+      "s.jsonl",
+    );
+    writeFileSync(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          id: "session-1",
+          cwd: "/tmp/paseo-pi-rpc-test",
+          timestamp: "2026-01-01T00:00:00.000Z",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "entry-1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: "hello tree" },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    pi.latestSession().state.sessionFile = sessionFile;
+    pi.latestSession().commands = [
+      { name: "treed", description: "Tree delete", source: "extension" },
+      { name: "paseo_tree", description: "Internal", source: "extension" },
+      { name: "review", description: "Review changes", source: "extension" },
+    ];
+
+    await expect(session.listCommands()).resolves.toEqual([
+      expect.objectContaining({
+        name: "tree",
+        argumentOptions: [
+          expect.objectContaining({
+            id: "entry-1",
+            label: "● user",
+          }),
+        ],
+      }),
+      { name: "review", description: "Review changes", argumentHint: "" },
+    ]);
+  });
+
+  test("handles /tree out-of-band through the Pi extension bridge", async () => {
+    const { pi, session } = await createSession();
+    const sessionFile = path.join(
+      mkdtempSync(path.join(tmpdir(), "paseo-pi-tree-agent-")),
+      "s.jsonl",
+    );
+    writeFileSync(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          id: "session-1",
+          cwd: "/tmp/paseo-pi-rpc-test",
+          timestamp: "2026-01-01T00:00:00.000Z",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "entry-1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: "hello tree" },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "entry-2",
+          parentId: "entry-1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "answer" }] },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    pi.latestSession().state.sessionFile = sessionFile;
+
+    const handler = session.tryHandleOutOfBand?.("/tree entry-1 extra text");
+    const result = await handler?.run({ emit: () => undefined });
+
+    expect(pi.latestSession().treeNavigationRequests).toEqual(["entry-1"]);
+    expect(result).toEqual({
+      rehydrateTimeline: true,
+      timelineItems: [
+        expect.objectContaining({
+          type: "assistant_message",
+          text: expect.stringContaining("Selected Pi tree entry `entry-1`"),
+        }),
+      ],
+    });
+    await expect(session.listCommands()).resolves.toEqual([
+      expect.objectContaining({
+        name: "tree",
+        argumentOptions: expect.arrayContaining([
+          expect.objectContaining({
+            id: "entry-1",
+            label: "↳ user",
+          }),
+        ]),
+      }),
     ]);
   });
 
@@ -521,6 +669,8 @@ describe("PiRpcAgentClient", () => {
       "medium",
       "--mcp-config",
       actualLaunch.mcpConfigPath,
+      "--extension",
+      actualLaunch.extensionPaths?.[0],
     ]);
     expect(session.capabilities.supportsMcpServers).toBe(true);
 
@@ -565,7 +715,16 @@ describe("PiRpcAgentClient", () => {
     );
 
     expect(pi.recordedLaunches).toHaveLength(2);
-    expect(pi.recordedLaunches[1]?.argv).toEqual(["pi", "--mode", "rpc", "--thinking", "medium"]);
+    const actualLaunch = pi.recordedLaunches[1];
+    expect(actualLaunch?.argv).toEqual([
+      "pi",
+      "--mode",
+      "rpc",
+      "--thinking",
+      "medium",
+      "--extension",
+      actualLaunch?.extensionPaths?.[0],
+    ]);
     expect(pi.recordedLaunches[1]?.mcpConfigPath).toBeUndefined();
     expect(session.capabilities.supportsMcpServers).toBe(false);
   });

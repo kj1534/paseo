@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { agentHistoryQueryKey } from "./agent-history-query-key";
 
 export const ARCHIVE_AGENT_PENDING_QUERY_KEY = ["archive-agent-pending"] as const;
+const RECENT_PROVIDER_SESSIONS_QUERY_KEY = ["recent-provider-sessions"] as const;
 const EMPTY_PENDING_ARCHIVE_AGENT_IDS = new Set<string>();
 
 export interface ArchiveAgentInput {
@@ -349,6 +350,9 @@ export function applyArchivedAgentCloseResults(input: ApplyArchivedAgentCloseRes
     void input.queryClient.invalidateQueries({
       queryKey: agentHistoryQueryKey(input.serverId),
     });
+    void input.queryClient.invalidateQueries({
+      queryKey: RECENT_PROVIDER_SESSIONS_QUERY_KEY,
+    });
   }
 }
 
@@ -443,6 +447,9 @@ export function useArchiveAgent() {
       });
       void queryClient.invalidateQueries({
         queryKey: agentHistoryQueryKey(input.serverId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: RECENT_PROVIDER_SESSIONS_QUERY_KEY,
       });
     },
   });

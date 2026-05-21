@@ -183,9 +183,9 @@ Get the session ID from the agent JSON (`persistence.sessionId`), then:
 
 **Pi:**
 
-Pi Coding Agent owns the JSONL files under its agent directory. Paseo discovers them through
-`SessionManager.list(cwd)` / `SessionManager.listAll()` and persists the JSONL path in
-`persistence.nativeHandle` so resume/import can reopen the exact native session file.
+Pi Coding Agent owns the JSONL files under its agent directory. Paseo discovers them by scanning
+Pi's configured session directory, filtering by the session header `cwd`, and persisting the JSONL
+path in `persistence.nativeHandle` so resume/import can reopen the exact native session file.
 
 ## Testing with Playwright MCP
 

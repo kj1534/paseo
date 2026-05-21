@@ -62,6 +62,27 @@ function sessionInfo(name: string, timestamp: string): unknown {
   };
 }
 
+function modelChange(input: { provider: string; modelId: string; timestamp: string }): unknown {
+  return {
+    type: "model_change",
+    id: `model-${input.timestamp}`,
+    parentId: null,
+    timestamp: input.timestamp,
+    provider: input.provider,
+    modelId: input.modelId,
+  };
+}
+
+function thinkingLevelChange(thinkingLevel: string, timestamp: string): unknown {
+  return {
+    type: "thinking_level_change",
+    id: `thinking-${timestamp}`,
+    parentId: null,
+    timestamp,
+    thinkingLevel,
+  };
+}
+
 describe("listPiPersistedAgents", () => {
   test("lists Pi sessions from the configured agent dir", async () => {
     const root = tempRoot();
@@ -167,6 +188,64 @@ describe("listPiPersistedAgents", () => {
     });
 
     expect(descriptors.map((descriptor) => descriptor.sessionId)).toEqual(["runtime-session"]);
+  });
+
+  test("includes latest Pi model and thinking metadata for resume", async () => {
+    const root = tempRoot();
+    const cwd = path.join(root, "project");
+    const sessionsDir = path.join(root, "agent", "sessions");
+    const sessionFile = writeJsonl(
+      path.join(sessionsDir, "metadata.jsonl"),
+      piSession({
+        id: "metadata-session",
+        cwd,
+        entries: [
+          modelChange({
+            provider: "newapi-silly",
+            modelId: "old-model",
+            timestamp: "2026-01-01T00:00:01.000Z",
+          }),
+          thinkingLevelChange("medium", "2026-01-01T00:00:02.000Z"),
+          message({
+            role: "user",
+            content: "first prompt",
+            timestamp: "2026-01-01T00:00:03.000Z",
+          }),
+          message({
+            role: "assistant",
+            content: [{ type: "text", text: "answer" }],
+            timestamp: "2026-01-01T00:00:04.000Z",
+          }),
+          modelChange({
+            provider: "newapi-code",
+            modelId: "mimo-v2.5-pro",
+            timestamp: "2026-01-01T00:00:05.000Z",
+          }),
+          thinkingLevelChange("xhigh", "2026-01-01T00:00:06.000Z"),
+        ],
+      }),
+    );
+
+    const descriptors = await listPiPersistedAgents({
+      cwd,
+      env: { PI_CODING_AGENT_DIR: path.join(root, "agent") },
+      homeDir: root,
+    });
+
+    expect(descriptors).toEqual([
+      expect.objectContaining({
+        sessionId: "metadata-session",
+        persistence: expect.objectContaining({
+          nativeHandle: sessionFile,
+          metadata: {
+            provider: "pi",
+            cwd,
+            model: "newapi-code/mimo-v2.5-pro",
+            thinkingOptionId: "xhigh",
+          },
+        }),
+      }),
+    ]);
   });
 
   test("resolves project settings sessionDir relative to the requested cwd", async () => {

@@ -912,7 +912,7 @@ describe("processAgentStreamEvent", () => {
     expect(result.sideEffects).toEqual([]);
   });
 
-  it("drops timeline event with epoch mismatch", () => {
+  it("resets timeline when a live timeline event arrives with a new epoch", () => {
     const existingCursor: TimelineCursor = {
       epoch: "epoch-1",
       startSeq: 1,
@@ -921,16 +921,25 @@ describe("processAgentStreamEvent", () => {
 
     const result = processAgentStreamEvent({
       ...baseStreamInput,
-      event: makeTimelineEvent("wrong epoch"),
-      seq: 6,
+      event: makeTimelineEvent("rehydrated"),
+      seq: 1,
       epoch: "epoch-2",
       currentCursor: existingCursor,
+      currentTail: [makeAssistantItem("old branch")],
+      currentHead: [makeAssistantItem("optimistic")],
     });
 
-    expect(result.cursorChanged).toBe(false);
-    expect(result.changedTail).toBe(false);
-    expect(result.changedHead).toBe(false);
-    expect(result.sideEffects).toEqual([]);
+    expect(result.cursorChanged).toBe(true);
+    expect(result.cursor).toEqual({
+      epoch: "epoch-2",
+      startSeq: 1,
+      endSeq: 1,
+    });
+    expect(result.changedTail).toBe(true);
+    expect(result.changedHead).toBe(true);
+    expect(result.tail).toEqual([]);
+    expect(getAssistantTexts(result.head)).toEqual(["rehydrated"]);
+    expect(result.sideEffects).toEqual([{ type: "invalidate_agent_commands" }]);
   });
 
   it("initializes cursor when none exists", () => {
@@ -1470,6 +1479,39 @@ describe("createAgentStreamReducerQueue", () => {
     queue.flushAgent("agent-1");
 
     expect(commits).toEqual(["agent-1:queued"]);
+    expect(scheduler.size).toBe(0);
+  });
+
+  it("forwards command invalidation side effects after a live epoch reset", () => {
+    const scheduler = createManualScheduler();
+    const handledEffects: Array<{ agentId: string; type: string }> = [];
+    const queue = createAgentStreamReducerQueue({
+      getSnapshot: () => ({
+        currentTail: [makeAssistantItem("old branch")],
+        currentHead: [],
+        currentCursor: { epoch: "epoch-1", startSeq: 1, endSeq: 5 },
+        currentAgent: null,
+      }),
+      commit: () => {},
+      handleSideEffects: (agentId, sideEffects) => {
+        handledEffects.push(
+          ...sideEffects.map((effect) => ({
+            agentId,
+            type: effect.type,
+          })),
+        );
+      },
+      scheduleFlush: scheduler.schedule,
+      cancelFlush: scheduler.cancel,
+    });
+
+    queue.enqueue("agent-1", {
+      ...makeStreamReducerEvent(makeTimelineEvent("rehydrated"), 1),
+      epoch: "epoch-2",
+    });
+    queue.flushAgent("agent-1");
+
+    expect(handledEffects).toEqual([{ agentId: "agent-1", type: "invalidate_agent_commands" }]);
     expect(scheduler.size).toBe(0);
   });
 

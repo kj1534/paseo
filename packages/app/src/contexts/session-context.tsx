@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useClientActivity } from "@/hooks/use-client-activity";
 import { usePushTokenRegistration } from "@/hooks/use-push-token-registration";
 import { clearArchiveAgentPending } from "@/hooks/use-archive-agent";
+import { agentCommandsQueryRoot } from "@/hooks/use-agent-commands-query";
 import { prefetchProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { generateMessageId, type StreamItem } from "@/types/stream";
 import {
@@ -1188,6 +1189,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       setAgentTimelineCursor,
       setAgents,
       requestCanonicalCatchUp,
+      invalidateAgentCommands: (agentId) => {
+        void queryClient.invalidateQueries({
+          queryKey: agentCommandsQueryRoot(serverId, agentId),
+        });
+      },
     });
 
     const unsubAgentStream = client.on("agent_stream", (message) => {

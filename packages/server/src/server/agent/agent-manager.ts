@@ -341,6 +341,29 @@ function attachPersistenceCwd(
   };
 }
 
+function hasRuntimeInfoChanged(
+  previous: AgentRuntimeInfo | undefined,
+  next: AgentRuntimeInfo,
+): boolean {
+  return (
+    next.model !== previous?.model ||
+    next.thinkingOptionId !== previous?.thinkingOptionId ||
+    next.sessionId !== previous?.sessionId ||
+    next.modeId !== previous?.modeId
+  );
+}
+
+function hasPersistenceHandleChanged(
+  previous: AgentPersistenceHandle | null | undefined,
+  next: AgentPersistenceHandle,
+): boolean {
+  return (
+    next.sessionId !== previous?.sessionId ||
+    next.nativeHandle !== previous?.nativeHandle ||
+    JSON.stringify(next.metadata ?? {}) !== JSON.stringify(previous?.metadata ?? {})
+  );
+}
+
 interface SubscriptionRecord {
   callback: AgentSubscriber;
   agentId: string | null;
@@ -881,9 +904,6 @@ export class AgentManager {
       ...overrides,
       provider: handle.provider,
     } as AgentSessionConfig;
-    const normalizedConfig = this.applyDaemonAppendSystemPrompt(
-      await this.normalizeConfig(mergedConfig),
-    );
     const hasExplicitResumeModel =
       hasExplicitModelConfig(metadata) || hasExplicitModelConfig(overrides);
     const normalizedConfig = this.applyDaemonAppendSystemPrompt(
@@ -2662,25 +2682,36 @@ export class AgentManager {
   private async refreshRuntimeInfo(agent: ActiveManagedAgent): Promise<void> {
     try {
       const newInfo = await agent.session.getRuntimeInfo();
-      const changed =
-        newInfo.model !== agent.runtimeInfo?.model ||
-        newInfo.thinkingOptionId !== agent.runtimeInfo?.thinkingOptionId ||
-        newInfo.sessionId !== agent.runtimeInfo?.sessionId ||
-        newInfo.modeId !== agent.runtimeInfo?.modeId;
+      const runtimeInfoChanged = hasRuntimeInfoChanged(agent.runtimeInfo, newInfo);
       agent.runtimeInfo = newInfo;
-      if (!agent.persistence && newInfo.sessionId) {
-        agent.persistence = attachPersistenceCwd(
-          { provider: agent.provider, sessionId: newInfo.sessionId },
-          agent.cwd,
-        );
-      }
-      // Emit state if runtimeInfo changed so clients get the updated model
-      if (changed) {
+      const persistenceChanged = this.refreshPersistenceHandle(agent, newInfo);
+      // Emit state if runtimeInfo or persistence changed so clients keep model
+      // and resume metadata in sync.
+      if (runtimeInfoChanged || persistenceChanged) {
         this.emitState(agent);
       }
     } catch {
       // Keep existing runtimeInfo if refresh fails.
     }
+  }
+
+  private refreshPersistenceHandle(
+    agent: ActiveManagedAgent,
+    runtimeInfo: AgentRuntimeInfo,
+  ): boolean {
+    const persistenceHandle =
+      agent.session.describePersistence() ??
+      (runtimeInfo.sessionId
+        ? { provider: agent.provider, sessionId: runtimeInfo.sessionId }
+        : null);
+    const nextPersistence = attachPersistenceCwd(persistenceHandle, agent.cwd);
+    if (!nextPersistence) {
+      return false;
+    }
+
+    const changed = hasPersistenceHandleChanged(agent.persistence, nextPersistence);
+    agent.persistence = nextPersistence;
+    return changed;
   }
 
   private async hydrateTimelineFromLegacyProviderHistory(

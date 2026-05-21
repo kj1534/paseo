@@ -31,10 +31,12 @@ export type TimelineReducerSideEffect =
   | { type: "catch_up"; cursor: { epoch: string; endSeq: number } }
   | { type: "flush_pending_updates" };
 
-export interface AgentStreamReducerSideEffect {
-  type: "catch_up";
-  cursor: { epoch: string; endSeq: number };
-}
+export type AgentStreamReducerSideEffect =
+  | {
+      type: "catch_up";
+      cursor: { epoch: string; endSeq: number };
+    }
+  | { type: "invalidate_agent_commands" };
 
 // ---------------------------------------------------------------------------
 // processTimelineResponse
@@ -679,6 +681,7 @@ export function processAgentStreamEvent(
     input;
 
   let shouldApplyStreamEvent = true;
+  let shouldResetTimelineForEpoch = false;
   let nextTimelineCursor: TimelineCursor | null = null;
   let cursorChanged = false;
   const sideEffects: AgentStreamReducerSideEffect[] = [];
@@ -714,8 +717,13 @@ export function processAgentStreamEvent(
           },
         });
       }
+    } else if (decision === "drop_epoch") {
+      shouldResetTimelineForEpoch = true;
+      nextTimelineCursor = { epoch, startSeq: seq, endSeq: seq };
+      cursorChanged = true;
+      sideEffects.push({ type: "invalidate_agent_commands" });
     } else {
-      // drop_stale or drop_epoch
+      // drop_stale
       shouldApplyStreamEvent = false;
     }
   }
@@ -724,13 +732,22 @@ export function processAgentStreamEvent(
   // Apply stream event to tail/head
   // ------------------------------------------------------------------
   const { tail, head, changedTail, changedHead } = shouldApplyStreamEvent
-    ? applyStreamEvent({
-        tail: currentTail,
-        head: currentHead,
-        event,
-        timestamp,
-        source: "live",
-      })
+    ? (() => {
+        const applied = applyStreamEvent({
+          tail: shouldResetTimelineForEpoch ? [] : currentTail,
+          head: shouldResetTimelineForEpoch ? [] : currentHead,
+          event,
+          timestamp,
+          source: "live",
+        });
+        return shouldResetTimelineForEpoch
+          ? {
+              ...applied,
+              changedTail: true,
+              changedHead: currentHead.length > 0 || applied.changedHead,
+            }
+          : applied;
+      })()
     : {
         tail: currentTail,
         head: currentHead,
@@ -925,6 +942,7 @@ export interface CreateSessionAgentStreamReducerQueueInput {
   ) => void;
   setAgents: (serverId: string, state: (prev: Map<string, Agent>) => Map<string, Agent>) => void;
   requestCanonicalCatchUp: (agentId: string, cursor: { epoch: string; endSeq: number }) => void;
+  invalidateAgentCommands: (agentId: string) => void;
 }
 
 function scheduleAgentStreamReducerFlush(callback: () => void): number {
@@ -944,6 +962,7 @@ export function createSessionAgentStreamReducerQueue(
     setAgentTimelineCursor,
     setAgents,
     requestCanonicalCatchUp,
+    invalidateAgentCommands,
   } = input;
 
   return createAgentStreamReducerQueue({
@@ -1023,6 +1042,8 @@ export function createSessionAgentStreamReducerQueue(
       for (const effect of sideEffects) {
         if (effect.type === "catch_up") {
           requestCanonicalCatchUp(agentId, effect.cursor);
+        } else if (effect.type === "invalidate_agent_commands") {
+          invalidateAgentCommands(agentId);
         }
       }
     },

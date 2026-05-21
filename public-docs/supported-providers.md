@@ -18,6 +18,14 @@ Work out of the box once the underlying CLI is installed and authenticated.
 - [OpenCode](https://opencode.ai/). Open-source coding assistant with multi-provider model support.
 - [pi](https://github.com/svkozak/pi-acp). Minimal terminal-based coding agent with multi-provider LLM support.
 
+### Pi session import and tree navigation
+
+Paseo can import existing Pi sessions from Pi's session history. In the import sheet, choose a Pi session for the current project; from the CLI, use `paseo import --provider pi <session-id-or-jsonl-path>`.
+
+Imported Pi sessions expose `/tree` in the message box. Type `/tree ` to pick a Pi tree entry, then send `/tree <entryId>` and wait for Paseo to reload the session. Selecting a user prompt moves Pi to that prompt's parent branch point, so your next normal message creates a sibling branch without changing the existing prompt or replies. Selecting an assistant response continues from that response.
+
+Paseo does not expose `/treed` as an app command. `/treed` is a third-party Pi extension for deleting tree entries with interactive terminal shortcuts, so use `pi resume` in a terminal when you need it.
+
 ## ACP catalog
 
 Pick any of these from the in-app provider catalog. Each entry is a one-click install of the underlying CLI.

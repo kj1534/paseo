@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+
 import type {
   PiRuntime,
   PiRuntimeLaunch,
@@ -51,6 +53,7 @@ export class FakePi implements PiRuntime {
 
 export class FakePiSession implements PiRuntimeSession {
   readonly prompts: Array<{ message: string; imageCount: number }> = [];
+  readonly treeNavigationRequests: string[] = [];
   readonly setModelRequests: Array<{ provider: string; modelId: string }> = [];
   readonly setThinkingLevelRequests: string[] = [];
   abortRequested = false;
@@ -60,6 +63,7 @@ export class FakePiSession implements PiRuntimeSession {
     response: { value?: string; confirmed?: boolean; cancelled?: boolean };
   }> = [];
   setModelResult: PiModel | null = null;
+  promptError: Error | null = null;
   models: PiModel[] = [];
   messages: PiAgentMessage[] = [];
   stats: PiSessionStats = {
@@ -96,6 +100,25 @@ export class FakePiSession implements PiRuntimeSession {
     images?: Array<{ type: "image"; data: string; mimeType: string }>,
   ): Promise<void> {
     this.prompts.push({ message, imageCount: images?.length ?? 0 });
+    if (this.promptError) {
+      throw this.promptError;
+    }
+    const payload = message.startsWith("/paseo_tree ")
+      ? message.slice("/paseo_tree ".length)
+      : null;
+    if (!payload) {
+      return;
+    }
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      targetId: string;
+      resultPath: string;
+    };
+    this.treeNavigationRequests.push(decoded.targetId);
+    writeFileSync(
+      decoded.resultPath,
+      `${JSON.stringify({ ok: true, result: { editorText: `selected ${decoded.targetId}` } })}\n`,
+      "utf8",
+    );
   }
 
   async abort(): Promise<void> {

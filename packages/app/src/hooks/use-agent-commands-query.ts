@@ -25,11 +25,13 @@ export interface DraftCommandConfig {
   featureValues?: Record<string, unknown>;
 }
 
+export function agentCommandsQueryRoot(serverId: string, agentId: string) {
+  return ["agentCommands", serverId, agentId] as const;
+}
+
 function commandsQueryKey(serverId: string, agentId: string, draftConfig?: DraftCommandConfig) {
   return [
-    "agentCommands",
-    serverId,
-    agentId,
+    ...agentCommandsQueryRoot(serverId, agentId),
     draftConfig?.provider ?? null,
     draftConfig?.cwd ?? null,
     draftConfig?.modeId ?? null,
@@ -44,6 +46,7 @@ interface UseAgentCommandsQueryOptions {
   agentId: string;
   enabled?: boolean;
   draftConfig?: DraftCommandConfig;
+  staleTime?: number;
 }
 
 export function useAgentCommandsQuery({
@@ -51,6 +54,7 @@ export function useAgentCommandsQuery({
   agentId,
   enabled = true,
   draftConfig,
+  staleTime = COMMANDS_STALE_TIME,
 }: UseAgentCommandsQueryOptions) {
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -65,7 +69,7 @@ export function useAgentCommandsQuery({
       return response.commands as AgentSlashCommand[];
     },
     enabled: enabled && !!client && isConnected && (!!agentId || !!draftConfig),
-    staleTime: COMMANDS_STALE_TIME,
+    staleTime,
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
   });

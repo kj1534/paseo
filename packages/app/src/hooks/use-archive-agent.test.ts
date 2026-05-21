@@ -176,6 +176,9 @@ describe("useArchiveAgent", () => {
       ],
       pageParams: [null],
     });
+    queryClient.setQueryData(["recent-provider-sessions", "/repo", "pi"], {
+      entries: [{ providerId: "pi", providerHandleId: "pi-session-1" }],
+    });
 
     applyArchivedAgentCloseResults({
       queryClient,
@@ -206,6 +209,9 @@ describe("useArchiveAgent", () => {
       ],
       pageParams: [null],
     });
+    expect(
+      queryClient.getQueryState(["recent-provider-sessions", "/repo", "pi"])?.isInvalidated,
+    ).toBe(true);
   });
 
   it("can apply archived agent close results without invalidating cached lists", () => {
@@ -226,6 +232,9 @@ describe("useArchiveAgent", () => {
       ],
       pageParams: [null],
     });
+    queryClient.setQueryData(["recent-provider-sessions", "/repo", "pi"], {
+      entries: [{ providerId: "pi", providerHandleId: "pi-session-1" }],
+    });
 
     applyArchivedAgentCloseResults({
       queryClient,
@@ -237,6 +246,9 @@ describe("useArchiveAgent", () => {
     expect(queryClient.getQueryState(["sidebarAgentsList", "server-a"])?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(["allAgents", "server-a"])?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(agentHistoryQueryKey("server-a"))?.isInvalidated).toBe(false);
+    expect(
+      queryClient.getQueryState(["recent-provider-sessions", "/repo", "pi"])?.isInvalidated,
+    ).toBe(false);
     expect(queryClient.getQueryData(agentHistoryQueryKey("server-a"))).toEqual({
       pages: [
         {

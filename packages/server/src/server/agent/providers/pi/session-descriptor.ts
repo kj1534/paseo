@@ -35,6 +35,12 @@ interface PiSessionTail {
   title: string | null;
   lastActivityAt: Date | null;
   lastUserMessage: string | null;
+  model: string | null;
+  thinkingOptionId: string | null;
+}
+
+interface PiSessionTailAccumulator extends PiSessionTail {
+  fallbackTimestamp: Date | null;
 }
 
 export async function listPiPersistedAgents(
@@ -173,6 +179,10 @@ async function readPiSessionDescriptor(filePath: string): Promise<PersistedAgent
     metadata: {
       provider: PI_PROVIDER,
       cwd: header.cwd,
+      ...((tailInfo.model ?? headInfo.model) ? { model: tailInfo.model ?? headInfo.model } : {}),
+      ...((tailInfo.thinkingOptionId ?? headInfo.thinkingOptionId)
+        ? { thinkingOptionId: tailInfo.thinkingOptionId ?? headInfo.thinkingOptionId }
+        : {}),
     },
   };
 
@@ -236,63 +246,96 @@ function parseSessionHeader(firstLine: string): PiSessionHeader | null {
 
 function parseSessionTail(tail: string): PiSessionTail {
   const lines = tail.split(/\r?\n/);
-  let title: string | null = null;
-  let lastActivityAt: Date | null = null;
-  let fallbackTimestamp: Date | null = null;
-  let lastUserMessage: string | null = null;
+  const info: PiSessionTailAccumulator = {
+    title: null,
+    lastActivityAt: null,
+    fallbackTimestamp: null,
+    lastUserMessage: null,
+    model: null,
+    thinkingOptionId: null,
+  };
 
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const entry = parseJsonRecord(lines[index].trim());
     if (!entry) continue;
 
-    if (!title && entry.type === "session_info") {
-      title = readNonEmptyString(entry.name);
-    }
-
-    const entryTimestamp = parseDate(entry.timestamp);
-    if (!fallbackTimestamp && entryTimestamp) {
-      fallbackTimestamp = entryTimestamp;
-    }
-
-    if (entry.type !== "message") {
-      continue;
-    }
-
-    if (!lastActivityAt && entryTimestamp) {
-      lastActivityAt = entryTimestamp;
-    }
-
-    if (!lastUserMessage && isRecord(entry.message) && entry.message.role === "user") {
-      lastUserMessage = extractMessageText(entry.message.content);
-    }
-
-    if (title && lastActivityAt && lastUserMessage) {
+    mergeTailRecord(info, entry);
+    if (isTailInfoComplete(info)) {
       break;
     }
   }
 
-  return { title, lastActivityAt: lastActivityAt ?? fallbackTimestamp, lastUserMessage };
+  return {
+    title: info.title,
+    lastActivityAt: info.lastActivityAt ?? info.fallbackTimestamp,
+    lastUserMessage: info.lastUserMessage,
+    model: info.model,
+    thinkingOptionId: info.thinkingOptionId,
+  };
+}
+
+function mergeTailRecord(info: PiSessionTailAccumulator, entry: Record<string, unknown>): void {
+  info.model ??= readModelChange(entry) ?? readMessageModel(entry);
+  info.thinkingOptionId ??= readThinkingLevelChange(entry);
+
+  if (!info.title && entry.type === "session_info") {
+    info.title = readNonEmptyString(entry.name);
+  }
+
+  const entryTimestamp = parseDate(entry.timestamp);
+  if (!info.fallbackTimestamp && entryTimestamp) {
+    info.fallbackTimestamp = entryTimestamp;
+  }
+
+  if (entry.type !== "message") {
+    return;
+  }
+
+  if (!info.lastActivityAt && entryTimestamp) {
+    info.lastActivityAt = entryTimestamp;
+  }
+
+  if (!info.lastUserMessage && isRecord(entry.message) && entry.message.role === "user") {
+    info.lastUserMessage = extractMessageText(entry.message.content);
+  }
+}
+
+function isTailInfoComplete(info: PiSessionTailAccumulator): boolean {
+  return Boolean(
+    info.title &&
+    info.lastActivityAt &&
+    info.lastUserMessage &&
+    info.model &&
+    info.thinkingOptionId,
+  );
 }
 
 async function scanSessionHead(filePath: string): Promise<{
   title: string | null;
   firstUserMessage: string | null;
+  model: string | null;
+  thinkingOptionId: string | null;
 }> {
   let content: string;
   try {
     content = await readFile(filePath, "utf8");
   } catch {
-    return { title: null, firstUserMessage: null };
+    return { title: null, firstUserMessage: null, model: null, thinkingOptionId: null };
   }
 
   let title: string | null = null;
   let firstUserMessage: string | null = null;
+  let model: string | null = null;
+  let thinkingOptionId: string | null = null;
   let lineCount = 0;
 
   for (const rawLine of content.split(/\r?\n/)) {
     lineCount += 1;
     const entry = parseJsonRecord(rawLine.trim());
     if (!entry) continue;
+
+    model = readModelChange(entry) ?? readMessageModel(entry) ?? model;
+    thinkingOptionId = readThinkingLevelChange(entry) ?? thinkingOptionId;
 
     if (entry.type === "session_info") {
       title = readNonEmptyString(entry.name) ?? title;
@@ -304,7 +347,7 @@ async function scanSessionHead(filePath: string): Promise<{
       }
     }
 
-    if (title && firstUserMessage) {
+    if (title && firstUserMessage && model && thinkingOptionId) {
       break;
     }
     if (lineCount >= FULL_SCAN_LINE_LIMIT && firstUserMessage) {
@@ -312,7 +355,7 @@ async function scanSessionHead(filePath: string): Promise<{
     }
   }
 
-  return { title, firstUserMessage };
+  return { title, firstUserMessage, model, thinkingOptionId };
 }
 
 function buildPreviewTimeline(input: {
@@ -345,6 +388,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readModelChange(entry: Record<string, unknown>): string | null {
+  if (entry.type !== "model_change") {
+    return null;
+  }
+  return joinPiModelId(entry.provider, entry.modelId);
+}
+
+function readMessageModel(entry: Record<string, unknown>): string | null {
+  if (entry.type !== "message" || !isRecord(entry.message)) {
+    return null;
+  }
+  return joinPiModelId(entry.message.provider, entry.message.model);
+}
+
+function joinPiModelId(provider: unknown, modelId: unknown): string | null {
+  const providerValue = readNonEmptyString(provider);
+  const modelValue = readNonEmptyString(modelId);
+  return providerValue && modelValue ? `${providerValue}/${modelValue}` : null;
+}
+
+function readThinkingLevelChange(entry: Record<string, unknown>): string | null {
+  if (entry.type !== "thinking_level_change") {
+    return null;
+  }
+  return readNonEmptyString(entry.thinkingLevel);
 }
 
 function parseDate(value: unknown): Date | null {

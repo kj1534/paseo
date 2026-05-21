@@ -139,7 +139,7 @@ export class AgentStorage {
       });
 
     this.pendingWrites.set(agentId, tracked);
-    return tracked;
+    return next;
   }
 
   private async writeRecord(record: StoredAgentRecord): Promise<void> {

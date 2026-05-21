@@ -415,6 +415,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     agentId,
     enabled: (mode === "command" || mode === "command_argument") && canLoadCommands,
     draftConfig: queryDraftConfig,
+    staleTime: mode === "command_argument" ? 0 : undefined,
   });
 
   const fileSuggestionsQuery = useQuery({

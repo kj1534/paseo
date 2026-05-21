@@ -452,7 +452,7 @@ export function ImportSessionSheet({
     if (!visible) {
       setImportedSessionKeys(new Set());
     }
-  }, [visible, workspaceDirectory]);
+  }, [visible]);
 
   const aggregatedEntries = useMemo(
     () => aggregateSessionEntries(queries, importedSessionKeys),

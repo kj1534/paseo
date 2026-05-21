@@ -241,8 +241,8 @@ Pi also exposes provider slash commands for session-tree control. `/tree` is han
 out-of-band: Paseo calls Pi's native tree navigation, rehydrates the provider timeline, and then
 appends navigation feedback before the next foreground run can start. This is branch-point
 navigation, not file rewind. The interactive third-party `/treed` TUI command is intentionally not
-exposed as a Paseo command because it depends on highlighted-entry keyboard actions inside Pi's
-terminal UI.
+exposed as a Paseo command because its tree-delete actions depend on highlighted-entry keyboard
+shortcuts inside Pi's terminal UI, and Paseo cannot pass those actions as command arguments.
 
 ## Data flow: running an agent
 

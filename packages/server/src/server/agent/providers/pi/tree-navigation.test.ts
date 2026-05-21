@@ -266,6 +266,7 @@ describe("Pi tree navigation display", () => {
     expect(feedback).toContain("````\nTry another branch\n\n```ts\nconsole.log('x')\n```\n````");
     expect(feedback).toContain("creates a new sibling branch next to the selected user message");
     expect(feedback).toContain("The selected message and its existing replies are unchanged");
+    expect(feedback).toContain("reload may resume Pi's persisted leaf");
   });
 
   test("explains assistant entry navigation", () => {

@@ -219,6 +219,10 @@ function formatPiTreeNextMessageLine(input: PiTreeNavigationFeedbackInput): stri
   return "Tree navigation only changes the selected Pi branch point. The next normal message you send in Paseo continues from that branch point.";
 }
 
+function formatPiTreePendingSelectionLine(): string {
+  return "Send the next normal message before reloading this agent; reload may resume Pi's persisted leaf and clear this pending tree selection.";
+}
+
 function extractPiTreeDisplayPreview(
   message: Record<string, unknown>,
   role: "user" | "assistant",
@@ -621,6 +625,7 @@ export function formatPiTreeNavigationFeedback(input: PiTreeNavigationFeedbackIn
     );
   }
   lines.push("", formatPiTreeNextMessageLine(input));
+  lines.push(formatPiTreePendingSelectionLine());
   lines.push("", "This notice is local to Paseo and is not written into the Pi session.");
   return lines.join("\n");
 }

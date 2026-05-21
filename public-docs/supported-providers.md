@@ -22,7 +22,7 @@ Work out of the box once the underlying CLI is installed and authenticated.
 
 Paseo can import existing Pi sessions from Pi's session history. In the import sheet, choose a Pi session for the current project; from the CLI, use `paseo import --provider pi <session-id-or-jsonl-path>`.
 
-Imported Pi sessions expose `/tree` in the message box. Type `/tree ` to pick a Pi tree entry, then send `/tree <entryId>` and wait for Paseo to reload the session. Selecting a user prompt moves Pi to that prompt's parent branch point, so your next normal message creates a sibling branch without changing the existing prompt or replies. Selecting an assistant response continues from that response.
+Imported Pi sessions expose `/tree` in the message box. Type `/tree ` to pick a Pi tree entry, then send `/tree <entryId>` and wait for Paseo to reload the session. Selecting a user prompt moves Pi to that prompt's parent branch point, so your next normal message creates a sibling branch without changing the existing prompt or replies. Selecting an assistant response continues from that response. Send the next normal message before using reload agent; until that message is sent, the selected tree point is pending and reload may resume Pi's persisted leaf instead.
 
 Paseo does not expose `/treed` as an app command. `/treed` is a third-party Pi extension for deleting tree entries with interactive terminal shortcuts, so use `pi resume` in a terminal when you need it.
 

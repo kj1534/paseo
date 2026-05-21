@@ -357,6 +357,20 @@ function wrapSessionProvider(provider: AgentProvider, inner: AgentSession): Agen
     interrupt: () => inner.interrupt(),
     close: () => inner.close(),
     listCommands: inner.listCommands?.bind(inner),
+    tryHandleOutOfBand: inner.tryHandleOutOfBand
+      ? (prompt) => {
+          const handler = inner.tryHandleOutOfBand?.(prompt);
+          if (!handler) {
+            return null;
+          }
+          return {
+            run: (ctx) =>
+              handler.run({
+                emit: (event) => ctx.emit(mapStreamEvent(provider, event)),
+              }),
+          };
+        }
+      : undefined,
     setModel: inner.setModel?.bind(inner),
     setThinkingOption: inner.setThinkingOption?.bind(inner),
     setFeature: inner.setFeature?.bind(inner),

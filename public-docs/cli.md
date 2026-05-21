@@ -70,6 +70,27 @@ paseo send <id> --image screenshot.png "what's wrong here?"
 paseo send <id> --no-wait "queue this task"
 ```
 
+## Importing existing sessions
+
+Use `paseo import` to wrap an existing provider-owned session as a Paseo agent:
+
+```bash
+paseo import --provider claude <session-id>
+paseo import --provider codex <thread-id>
+paseo import --provider opencode <session-id>
+paseo import --provider pi <session-id-or-jsonl-path>
+```
+
+The same command is also available as `paseo agent import`. Pass `--cwd <path>` when the provider
+needs an explicit project directory.
+
+On Windows, quote native paths that contain backslashes, spaces, or non-ASCII characters so your
+shell passes them as one argument:
+
+```powershell
+paseo import --provider pi "D:\path\to\session.jsonl"
+```
+
 ## Viewing logs
 
 ```bash

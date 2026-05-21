@@ -71,6 +71,13 @@ export interface AgentSelectOption {
   metadata?: AgentMetadata;
 }
 
+export interface AgentSlashCommandArgumentOption {
+  id: string;
+  label: string;
+  description?: string;
+  metadata?: AgentMetadata;
+}
+
 export function normalizeAgentModelDefinition(model: AgentModelDefinition): AgentModelDefinition {
   const defaultThinkingOptionId =
     model.defaultThinkingOptionId ?? model.thinkingOptions?.find((option) => option.isDefault)?.id;
@@ -442,6 +449,7 @@ export interface AgentSlashCommand {
   name: string;
   description: string;
   argumentHint: string;
+  argumentOptions?: AgentSlashCommandArgumentOption[];
 }
 
 export interface ListPersistedAgentsOptions {
@@ -520,6 +528,18 @@ export interface AgentPermissionResult {
   followUpPrompt?: AgentPromptInput;
 }
 
+export interface AgentOutOfBandRunResult {
+  /**
+   * When true, the manager clears the current Paseo timeline rows for the agent
+   * and replays provider history before appending any returned timeline items.
+   * Providers use this for native history/tree navigation where the visible
+   * branch can change without a normal model turn.
+   */
+  rehydrateTimeline?: boolean;
+  /** Timeline items to append after any requested rehydration completes. */
+  timelineItems?: AgentTimelineItem[];
+}
+
 export interface AgentSession {
   readonly provider: AgentProvider;
   readonly id: string | null;
@@ -554,7 +574,7 @@ export interface AgentSession {
    * (e.g. /goal pause) reach the provider without canceling the running turn.
    */
   tryHandleOutOfBand?(prompt: AgentPromptInput): {
-    run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void>;
+    run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void | AgentOutOfBandRunResult>;
   } | null;
 }
 

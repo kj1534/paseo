@@ -102,6 +102,40 @@ function makeManagedAgent(args: {
   } satisfies ManagedAgent;
 }
 
+function makeStoredRecord(args: {
+  id?: string;
+  provider?: string;
+  cwd?: string;
+  sessionId: string;
+  nativeHandle?: string;
+  lastStatus?: StoredAgentRecord["lastStatus"];
+  archivedAt?: string | null;
+  internal?: boolean;
+  labels?: Record<string, string>;
+}): StoredAgentRecord {
+  const provider = args.provider ?? "codex";
+  const cwd = args.cwd ?? "/tmp/project";
+  return {
+    id: args.id ?? "00000000-0000-4000-8000-000000000832",
+    provider,
+    cwd,
+    createdAt: "2026-04-30T00:00:00.000Z",
+    updatedAt: "2026-04-30T00:00:00.000Z",
+    title: null,
+    labels: args.labels ?? {},
+    lastStatus: args.lastStatus ?? "idle",
+    config: null,
+    persistence: {
+      provider,
+      sessionId: args.sessionId,
+      ...(args.nativeHandle ? { nativeHandle: args.nativeHandle } : {}),
+      metadata: { provider, cwd },
+    },
+    internal: args.internal ?? false,
+    ...(args.archivedAt !== undefined ? { archivedAt: args.archivedAt } : {}),
+  };
+}
+
 function makeRequest(
   overrides: Partial<FetchRecentProviderSessionsRequestMessage> = {},
 ): FetchRecentProviderSessionsRequestMessage {
@@ -186,14 +220,7 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
   } satisfies Pick<AgentManager, "listAgents" | "listImportablePersistedAgents">;
   const agentStorage = {
     list: async () => [
-      {
-        provider: "codex",
-        persistence: {
-          provider: "codex",
-          sessionId: "stored-session",
-          nativeHandle: "stored-handle",
-        },
-      } as StoredAgentRecord,
+      makeStoredRecord({ sessionId: "stored-session", nativeHandle: "stored-handle" }),
     ],
   } satisfies Pick<AgentStorage, "list">;
 
@@ -239,6 +266,67 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
       },
     ],
   });
+});
+
+test("listImportableProviderSessions allows closed or archived stored sessions to be imported again", async () => {
+  const cwd = "/tmp/project";
+  const descriptors = [
+    makeDescriptor({
+      sessionId: "closed-session",
+      nativeHandle: "closed-handle",
+      cwd,
+      title: "Closed",
+      lastActivityAt: "2026-04-30T12:03:00.000Z",
+    }),
+    makeDescriptor({
+      sessionId: "archived-session",
+      nativeHandle: "archived-handle",
+      cwd,
+      title: "Archived",
+      lastActivityAt: "2026-04-30T12:02:00.000Z",
+    }),
+    makeDescriptor({
+      sessionId: "idle-session",
+      nativeHandle: "idle-handle",
+      cwd,
+      title: "Still imported",
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+  ];
+
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["codex"] }),
+    agentManager: {
+      listAgents: () => [],
+      listImportablePersistedAgents: async () => descriptors,
+    } satisfies Pick<AgentManager, "listAgents" | "listImportablePersistedAgents">,
+    agentStorage: {
+      list: async () => [
+        makeStoredRecord({
+          sessionId: "closed-session",
+          nativeHandle: "closed-handle",
+          lastStatus: "closed",
+        }),
+        makeStoredRecord({
+          sessionId: "archived-session",
+          nativeHandle: "archived-handle",
+          archivedAt: "2026-04-30T13:00:00.000Z",
+        }),
+        makeStoredRecord({
+          sessionId: "idle-session",
+          nativeHandle: "idle-handle",
+          lastStatus: "idle",
+        }),
+      ],
+    } satisfies Pick<AgentStorage, "list">,
+    providerRegistry: { codex: { label: "Codex" } },
+  });
+
+  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual([
+    "closed-handle",
+    "archived-handle",
+  ]);
+  expect(result.filteredAlreadyImportedCount).toBe(1);
 });
 
 test("listImportableProviderSessions filters out metadata generation sessions", async () => {
@@ -420,7 +508,9 @@ test("importProviderSession resumes by provider handle, hydrates the timeline, a
     undefined,
     { labels: undefined },
   );
-  expect(agentManager.hydrateTimelineFromProvider).toHaveBeenCalledWith(snapshot.id);
+  expect(agentManager.hydrateTimelineFromProvider).toHaveBeenCalledWith(snapshot.id, {
+    force: true,
+  });
   expect(agentManager.setTitle).toHaveBeenCalledWith(snapshot.id, "Trace recent provider sessions");
   expect(scheduleAgentMetadataGeneration).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -434,6 +524,72 @@ test("importProviderSession resumes by provider handle, hydrates the timeline, a
   expect(result).toEqual({ snapshot, timelineSize: 2 });
 });
 
+test("importProviderSession reuses a closed stored agent id when importing the same native handle", async () => {
+  const cwd = "/tmp/imported-agent";
+  const stored = makeStoredRecord({
+    id: "00000000-0000-4000-8000-000000000634",
+    provider: "pi",
+    cwd,
+    sessionId: "pi-session-id",
+    nativeHandle: "D:\\Pi\\sessions\\session.jsonl",
+    lastStatus: "closed",
+    labels: { project: "paseo" },
+  });
+  const snapshot = makeManagedAgent({
+    id: stored.id,
+    provider: "pi",
+    cwd,
+    sessionId: "pi-session-id",
+    nativeHandle: "D:\\Pi\\sessions\\session.jsonl",
+    title: null,
+  });
+  const descriptor = makeDescriptor({
+    provider: "pi",
+    sessionId: "pi-session-id",
+    nativeHandle: "D:\\Pi\\sessions\\session.jsonl",
+    cwd,
+    title: null,
+    firstPrompt: "Resume Pi work",
+    lastActivityAt: "2026-04-30T00:00:00.000Z",
+  });
+  const agentManager = {
+    findPersistedAgent: vi.fn().mockResolvedValue(descriptor),
+    getAgent: vi.fn().mockReturnValue(null),
+    resumeAgentFromPersistence: vi.fn().mockResolvedValue(snapshot),
+    hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
+    getTimeline: vi.fn().mockReturnValue([]),
+    setTitle: vi.fn().mockResolvedValue(undefined),
+    notifyAgentState: vi.fn(),
+  } as unknown as AgentManager;
+  const agentStorage = {
+    list: vi.fn().mockResolvedValue([stored]),
+    get: vi.fn().mockResolvedValue(stored),
+  } as unknown as AgentStorage;
+
+  await importProviderSession({
+    request: {
+      requestId: "import-thread",
+      provider: "pi",
+      providerHandleId: "D:\\Pi\\sessions\\session.jsonl",
+      cwd,
+    },
+    agentManager,
+    agentStorage,
+    logger: { warn: vi.fn(), error: vi.fn() } as never,
+  });
+
+  expect(agentManager.resumeAgentFromPersistence).toHaveBeenCalledWith(
+    descriptor.persistence,
+    { cwd },
+    stored.id,
+    { labels: stored.labels },
+  );
+  expect(agentManager.hydrateTimelineFromProvider).toHaveBeenCalledWith(snapshot.id, {
+    force: true,
+  });
+  expect(agentManager.setTitle).toHaveBeenCalledWith(snapshot.id, "Resume Pi work");
+});
+
 test("importProviderSession builds a fallback handle when a non-OpenCode provider has no descriptor", async () => {
   const cwd = "/tmp/imported-agent";
   const snapshot = makeManagedAgent({
@@ -444,6 +600,7 @@ test("importProviderSession builds a fallback handle when a non-OpenCode provide
   });
   const agentManager = {
     findPersistedAgent: vi.fn().mockResolvedValue(null),
+    getAgent: vi.fn().mockReturnValue(null),
     resumeAgentFromPersistence: vi.fn().mockResolvedValue(snapshot),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
     getTimeline: vi.fn().mockReturnValue([]),

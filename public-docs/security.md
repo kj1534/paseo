@@ -109,11 +109,12 @@ We still recommend the relay for mobile access, it combines authentication with 
 
 ## Agent authentication
 
-Paseo wraps agent CLIs (Claude Code, Codex, OpenCode) but does not manage their authentication. Each agent provider handles its own credentials:
+Paseo wraps agent CLIs (Claude Code, Codex, OpenCode, Pi) but does not manage their authentication. Each agent provider handles its own credentials:
 
 - **Claude Code**, authenticates via Anthropic's OAuth flow, stored in `~/.claude/`
 - **Codex**, uses your OpenAI API key or OAuth session
 - **OpenCode**, configured via provider-specific API keys
+- **Pi**, uses the model provider credentials already configured for Pi
 
 Paseo never stores or transmits provider API keys. Agents run in your user context with your existing credentials.
 

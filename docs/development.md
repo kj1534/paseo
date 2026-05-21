@@ -181,6 +181,12 @@ Get the session ID from the agent JSON (`persistence.sessionId`), then:
 ~/.codex/sessions/{YYYY}/{MM}/{DD}/rollout-{timestamp}-{session-id}.jsonl
 ```
 
+**Pi:**
+
+Pi Coding Agent owns the JSONL files under its agent directory. Paseo discovers them through
+`SessionManager.list(cwd)` / `SessionManager.listAll()` and persists the JSONL path in
+`persistence.nativeHandle` so resume/import can reopen the exact native session file.
+
 ## Testing with Playwright MCP
 
 Point Playwright MCP at the running Expo web target. Under `npm run dev` (macOS/Linux) that is the portless URL printed in the dev banner — typically `https://app.localhost`. If you start Expo directly with `expo start --web` (no portless), Metro defaults to `http://localhost:8081`.

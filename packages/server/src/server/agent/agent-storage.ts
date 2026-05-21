@@ -130,11 +130,13 @@ export class AgentStorage {
       return undefined;
     });
 
-    const tracked = next.finally(() => {
-      if (this.pendingWrites.get(agentId) === tracked) {
-        this.pendingWrites.delete(agentId);
-      }
-    });
+    const tracked = next
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.pendingWrites.get(agentId) === tracked) {
+          this.pendingWrites.delete(agentId);
+        }
+      });
 
     this.pendingWrites.set(agentId, tracked);
     return tracked;
@@ -412,5 +414,34 @@ async function writeFileAtomically(targetPath: string, payload: string) {
   const directory = path.dirname(targetPath);
   const tempPath = path.join(directory, `.agent.tmp-${process.pid}-${Date.now()}-${randomUUID()}`);
   await fs.writeFile(tempPath, payload, "utf8");
-  await fs.rename(tempPath, targetPath);
+  try {
+    await renameWithTransientRetry(tempPath, targetPath);
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function renameWithTransientRetry(sourcePath: string, targetPath: string) {
+  const retryDelaysMs = [20, 50, 100];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      if (!isTransientRenameError(error) || attempt >= retryDelaysMs.length) {
+        throw error;
+      }
+      await sleep(retryDelaysMs[attempt]!);
+    }
+  }
+}
+
+function isTransientRenameError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

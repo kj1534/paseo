@@ -257,6 +257,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
+  pi: "Pi",
 };
 
 function createSnapshotEntry(
@@ -411,6 +412,44 @@ describe("ImportSessionSheet", () => {
     screen.getByText("Make the rows readable and provider opaque");
   });
 
+  it("includes Pi when the provider snapshot reports Pi enabled", async () => {
+    const fetchRecentProviderSessions = vi.fn(async () => ({
+      requestId: "recent-pi",
+      entries: [
+        createProviderSessionEntry({
+          providerId: "pi",
+          providerLabel: "Pi",
+          providerHandleId: "/tmp/pi-session.jsonl",
+          title: "Existing Pi branch",
+          firstPromptPreview: "Start from Pi",
+          lastPromptPreview: "Continue from Pi",
+        }),
+      ],
+    }));
+    const importAgent = vi.fn();
+
+    renderSheet(
+      { fetchRecentProviderSessions, importAgent } as Pick<
+        DaemonClient,
+        "fetchRecentProviderSessions" | "importAgent"
+      >,
+      {
+        snapshot: { supportsSnapshot: true, entries: [createSnapshotEntry("pi")] },
+      },
+    );
+
+    await waitFor(() => {
+      expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cwd: "/repo/paseo",
+        providers: ["pi"],
+        limit: 15,
+      });
+    });
+
+    await screen.findByText("Existing Pi branch");
+    screen.getByText("Continue from Pi");
+  });
+
   it("keeps cached rows visible and revalidates when reopened", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
@@ -501,6 +540,9 @@ describe("ImportSessionSheet", () => {
     });
     expect(onImportedAgent).toHaveBeenCalledWith("agent-imported");
     expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.queryByTestId("workspace-import-session-claude-provider-thread-1")).toBeNull();
+    });
   });
 
   it("shows an import error state without closing when selected session import fails", async () => {

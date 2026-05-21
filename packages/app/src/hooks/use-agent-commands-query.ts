@@ -8,6 +8,12 @@ export interface AgentSlashCommand {
   name: string;
   description: string;
   argumentHint: string;
+  argumentOptions?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  }>;
 }
 
 export interface DraftCommandConfig {

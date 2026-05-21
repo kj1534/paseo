@@ -3421,6 +3421,16 @@ const AgentSlashCommandSchema = z.object({
   name: z.string(),
   description: z.string(),
   argumentHint: z.string(),
+  argumentOptions: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        description: z.string().optional(),
+        metadata: z.record(z.unknown()).optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const ListCommandsResponseSchema = z.object({

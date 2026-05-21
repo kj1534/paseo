@@ -33,6 +33,7 @@ import {
   type AgentTimelineItem,
   type AgentUsage,
   type AgentRuntimeInfo,
+  type AgentOutOfBandRunResult,
   type ListPersistedAgentsOptions,
   type PersistedAgentDescriptor,
 } from "./agent-sdk-types.js";
@@ -130,6 +131,11 @@ export type AgentSubscriber = (event: AgentManagerEvent) => void;
 export interface SubscribeOptions {
   agentId?: string;
   replayState?: boolean;
+}
+
+interface HydrateTimelineOptions {
+  force?: boolean;
+  broadcast?: boolean;
 }
 
 export type ImportablePersistedAgentQueryOptions = ListPersistedAgentsOptions & {
@@ -361,6 +367,10 @@ function abortMessage(reason: unknown, fallbackMessage: string): string {
   return fallbackMessage;
 }
 
+function hasExplicitModelConfig(config: Partial<AgentSessionConfig> | undefined): boolean {
+  return typeof config?.model === "string" && config.model.trim().length > 0;
+}
+
 function createAbortError(signal: AbortSignal | undefined, fallbackMessage: string): Error {
   const message = abortMessage(signal?.reason, fallbackMessage);
   return Object.assign(new Error(message), { name: "AbortError" });
@@ -430,6 +440,7 @@ export class AgentManager {
   private readonly timelineStore = new InMemoryAgentTimelineStore();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
+  private readonly pendingOutOfBandRuns = new Map<string, Promise<void>>();
   private readonly foregroundRuns = new ForegroundRunState();
   private readonly subscribers = new Set<SubscriptionRecord>();
   private readonly idFactory: () => string;
@@ -873,10 +884,18 @@ export class AgentManager {
     const normalizedConfig = this.applyDaemonAppendSystemPrompt(
       await this.normalizeConfig(mergedConfig),
     );
+    const hasExplicitResumeModel =
+      hasExplicitModelConfig(metadata) || hasExplicitModelConfig(overrides);
+    const normalizedConfig = this.applyDaemonAppendSystemPrompt(
+      await this.normalizeConfig(mergedConfig),
+    );
+    if (!hasExplicitResumeModel) {
+      delete normalizedConfig.model;
+    }
     const resumeOverrides: Partial<AgentSessionConfig> = { ...overrides };
     let hasResumeOverrides = overrides !== undefined;
 
-    if (normalizedConfig.model !== mergedConfig.model) {
+    if (hasExplicitResumeModel && normalizedConfig.model !== mergedConfig.model) {
       resumeOverrides.model = normalizedConfig.model;
       hasResumeOverrides = true;
     }
@@ -1444,19 +1463,52 @@ export class AgentManager {
       }
       this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
     };
-    void (async () => {
-      try {
-        await handler.run({ emit: dispatch });
-      } catch (error) {
+    const previous = this.pendingOutOfBandRuns.get(agentId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(async () => {
+        this.requireSessionAgent(agentId);
+        const result = await handler.run({ emit: dispatch });
+        await this.applyOutOfBandRunResult(agentId, result);
+        return undefined;
+      })
+      .catch((error) => {
         const text = error instanceof Error ? error.message : "Out-of-band command failed";
         dispatch({
           type: "timeline",
           provider: agent.provider,
           item: { type: "assistant_message", text: `[Error] ${text}` },
         });
-      }
-    })();
+      })
+      .finally(() => {
+        if (this.pendingOutOfBandRuns.get(agentId) === run) {
+          this.pendingOutOfBandRuns.delete(agentId);
+        }
+      });
+    this.pendingOutOfBandRuns.set(agentId, run);
+    void run;
     return true;
+  }
+
+  async waitForOutOfBand(agentId: string): Promise<void> {
+    await (this.pendingOutOfBandRuns.get(agentId) ?? Promise.resolve()).catch(() => undefined);
+  }
+
+  private async applyOutOfBandRunResult(
+    agentId: string,
+    result: void | AgentOutOfBandRunResult,
+  ): Promise<void> {
+    if (!result) {
+      return;
+    }
+
+    if (result.rehydrateTimeline) {
+      await this.hydrateTimelineFromProvider(agentId, { force: true, broadcast: true });
+    }
+
+    for (const item of result.timelineItems ?? []) {
+      await this.appendTimelineItem(agentId, item);
+    }
   }
 
   recordUserMessage(
@@ -1567,6 +1619,7 @@ export class AgentManager {
       let turnId: string;
       let turnStream: ReturnType<ForegroundRunState["createTurnStream"]> | null = null;
       try {
+        await this.waitForOutOfBand(agentId);
         const result = await agent.session.startTurn(prompt, options);
         turnId = result.turnId;
       } catch (error) {
@@ -1984,9 +2037,12 @@ export class AgentManager {
    * timeline is empty (e.g., imported agents that have provider history
    * on disk but no persisted timeline rows). No-ops if already hydrated.
    */
-  async hydrateTimelineFromProvider(agentId: string): Promise<void> {
+  async hydrateTimelineFromProvider(
+    agentId: string,
+    options?: HydrateTimelineOptions,
+  ): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
-    await this.hydrateTimelineFromLegacyProviderHistory(agent);
+    await this.hydrateTimelineFromLegacyProviderHistory(agent, options);
   }
 
   async deleteCommittedTimeline(agentId: string): Promise<void> {
@@ -2627,10 +2683,47 @@ export class AgentManager {
     }
   }
 
-  private async hydrateTimelineFromLegacyProviderHistory(agent: ActiveManagedAgent): Promise<void> {
-    if (agent.historyPrimed) {
+  private async hydrateTimelineFromLegacyProviderHistory(
+    agent: ActiveManagedAgent,
+    options?: HydrateTimelineOptions,
+  ): Promise<void> {
+    if (agent.historyPrimed && !options?.force) {
       return;
     }
+
+    if (options?.force) {
+      const historyEvents: Extract<AgentStreamEvent, { type: "timeline" }>[] = [];
+      for await (const event of agent.session.streamHistory()) {
+        if (event.type === "timeline") {
+          historyEvents.push(event);
+        }
+      }
+
+      this.agentStreamCoalescer.flushAndDiscard(agent.id);
+      await this.deleteCommittedTimeline(agent.id);
+      this.timelineStore.delete(agent.id);
+      this.timelineStore.initialize(agent.id, { timestamp: new Date().toISOString() });
+      agent.historyPrimed = true;
+
+      for (const event of historyEvents) {
+        const row = this.recordTimeline(
+          agent.id,
+          event.item,
+          event.timestamp ? { timestamp: event.timestamp } : undefined,
+        );
+        if (options?.broadcast) {
+          this.dispatchStream(agent.id, event, {
+            seq: row.seq,
+            epoch: this.timelineStore.getEpoch(agent.id),
+            timestamp: row.timestamp,
+          });
+        }
+      }
+      this.touchUpdatedAt(agent);
+      this.emitState(agent);
+      return;
+    }
+
     agent.historyPrimed = true;
     const canonicalUserMessagesById = this.timelineStore.getCanonicalUserMessagesById(agent.id);
     try {

@@ -161,20 +161,26 @@ export async function importProviderSession(
     ? applyImportCwdOverride(descriptor.persistence, cwd)
     : buildImportPersistenceHandle({ provider, providerHandleId, cwd });
   const overrides = cwd ? ({ cwd } satisfies Partial<AgentSessionConfig>) : undefined;
+  const storedRecord = await findStoredAgentRecordByHandle(input.agentStorage, handle);
+  const storedAgentIsLoaded = storedRecord ? input.agentManager.getAgent(storedRecord.id) : null;
+  const resumeAgentId = storedRecord && !storedAgentIsLoaded ? storedRecord.id : undefined;
 
-  await unarchiveAgentByHandle(input.agentStorage, input.agentManager, handle);
+  if (storedRecord?.archivedAt) {
+    await unarchiveAgentState(input.agentStorage, input.agentManager, storedRecord.id);
+  }
   const snapshot = await input.agentManager.resumeAgentFromPersistence(
     handle,
     overrides,
-    undefined,
+    resumeAgentId,
     {
-      labels,
+      labels: labels ?? storedRecord?.labels,
     },
   );
   await unarchiveAgentState(input.agentStorage, input.agentManager, snapshot.id);
-  await input.agentManager.hydrateTimelineFromProvider(snapshot.id);
+  await input.agentManager.hydrateTimelineFromProvider(snapshot.id, { force: true });
   await applyImportedAgentTitle({
     snapshot,
+    descriptor,
     agentManager: input.agentManager,
     workspaceGitService: input.workspaceGitService,
     paseoHome: input.paseoHome,
@@ -189,42 +195,42 @@ export async function importProviderSession(
   };
 }
 
-async function unarchiveAgentByHandle(
+async function findStoredAgentRecordByHandle(
   agentStorage: AgentStorage,
-  agentManager: AgentManager,
   handle: AgentPersistenceHandle,
-): Promise<void> {
+): Promise<StoredAgentRecord | null> {
   const records = await agentStorage.list();
-  const matched = records.find(
-    (record) =>
-      record.persistence?.provider === handle.provider &&
-      record.persistence?.sessionId === handle.sessionId,
-  );
-  if (!matched) {
-    return;
-  }
-  await unarchiveAgentState(agentStorage, agentManager, matched.id);
+  return records.find((record) => persistenceMatchesHandle(record.persistence, handle)) ?? null;
 }
 
 async function applyImportedAgentTitle(input: {
   snapshot: ManagedAgent;
+  descriptor: PersistedAgentDescriptor | null;
   agentManager: AgentManager;
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   paseoHome?: string;
   logger: Logger;
   scheduleAgentMetadataGeneration: typeof scheduleAgentMetadataGeneration;
 }): Promise<void> {
-  const initialPrompt = getFirstUserMessageText(input.agentManager.getTimeline(input.snapshot.id));
-  if (!initialPrompt) {
+  const initialPrompt =
+    getFirstUserMessageText(input.agentManager.getTimeline(input.snapshot.id)) ??
+    getFirstUserMessageText(input.descriptor?.timeline ?? []);
+  const descriptorTitle = normalizeImportedTitle(input.descriptor?.title);
+  if (!initialPrompt && !descriptorTitle) {
     return;
   }
 
   const { explicitTitle, provisionalTitle } = resolveCreateAgentTitles({
-    configTitle: input.snapshot.config.title,
+    configTitle: input.snapshot.config.title ?? descriptorTitle,
     initialPrompt,
   });
-  if (!explicitTitle && provisionalTitle) {
-    await input.agentManager.setTitle(input.snapshot.id, provisionalTitle);
+  const titleToApply = explicitTitle ?? provisionalTitle;
+  if (titleToApply) {
+    await input.agentManager.setTitle(input.snapshot.id, titleToApply);
+  }
+
+  if (!initialPrompt) {
+    return;
   }
 
   input.scheduleAgentMetadataGeneration({
@@ -237,6 +243,11 @@ async function applyImportedAgentTitle(input: {
     paseoHome: input.paseoHome,
     logger: input.logger,
   });
+}
+
+function normalizeImportedTitle(title: string | null | undefined): string | null {
+  const normalized = title?.trim();
+  return normalized ? normalized : null;
 }
 
 function parseRecentProviderSessionsSince(since: string | undefined): number | null {
@@ -309,6 +320,9 @@ async function collectImportedProviderSessionHandles(
   }
 
   for (const record of await agentStorage.list()) {
+    if (!shouldStoredAgentBlockImport(record)) {
+      continue;
+    }
     collectProviderSessionHandleKeys(handles, record.provider, record.persistence);
   }
 
@@ -319,12 +333,37 @@ function toProviderSessionHandleKey(provider: string, providerHandleId: string):
   return `${provider}\0${providerHandleId}`;
 }
 
+function persistenceMatchesHandle(
+  persistence: AgentPersistenceHandle | null | undefined,
+  handle: AgentPersistenceHandle,
+): boolean {
+  if (!persistence || persistence.provider !== handle.provider) {
+    return false;
+  }
+  const handleIds = new Set([handle.sessionId, handle.nativeHandle].filter(isPresentString));
+  return (
+    handleIds.has(persistence.sessionId) ||
+    (persistence.nativeHandle ? handleIds.has(persistence.nativeHandle) : false)
+  );
+}
+
+function isPresentString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 function isMetadataGenerationDescriptor(descriptor: PersistedAgentDescriptor): boolean {
   for (const item of descriptor.timeline) {
     if (item.type !== "user_message") continue;
     return item.text.trimStart().startsWith(METADATA_GENERATION_PROMPT_PREFIX);
   }
   return false;
+}
+
+function shouldStoredAgentBlockImport(record: StoredAgentRecord): boolean {
+  if (record.internal || record.archivedAt) {
+    return false;
+  }
+  return record.lastStatus !== "closed";
 }
 
 function collectProviderSessionHandleKeys(

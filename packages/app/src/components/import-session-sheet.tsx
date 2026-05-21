@@ -12,6 +12,8 @@ import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/s
 import { getProviderIcon } from "@/components/provider-icons";
 import { formatTimeAgo } from "@/utils/time";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
+import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 
 const IMPORTABLE_PROVIDER_IDS: Set<string> = new Set(IMPORTABLE_PROVIDERS);
 const PER_PROVIDER_LIMIT = 15;
@@ -109,13 +111,15 @@ function buildSessionsQueriesConfig(args: {
 
 function aggregateSessionEntries(
   queries: ReadonlyArray<SessionsQueryResult>,
+  importedSessionKeys: ReadonlySet<string>,
 ): FetchRecentProviderSessionEntry[] {
   const seen = new Set<string>();
   const collected: FetchRecentProviderSessionEntry[] = [];
   for (const query of queries) {
     if (!query.data) continue;
     for (const entry of query.data.entries) {
-      const key = `${entry.providerId}:${entry.providerHandleId}`;
+      const key = getProviderSessionEntryKey(entry);
+      if (importedSessionKeys.has(key)) continue;
       if (seen.has(key)) continue;
       seen.add(key);
       collected.push(entry);
@@ -125,6 +129,24 @@ function aggregateSessionEntries(
     (a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime(),
   );
   return collected;
+}
+
+function getProviderSessionEntryKey(
+  entry: Pick<FetchRecentProviderSessionEntry, "providerId" | "providerHandleId">,
+): string {
+  return `${entry.providerId}:${entry.providerHandleId}`;
+}
+
+function removeImportedSessionFromResponse(
+  response: RecentSessionsResponse | undefined,
+  importedKey: string,
+): RecentSessionsResponse | undefined {
+  if (!response) return response;
+  const entries = response.entries.filter(
+    (entry) => getProviderSessionEntryKey(entry) !== importedKey,
+  );
+  if (entries.length === response.entries.length) return response;
+  return { ...response, entries };
 }
 
 function sumFilteredAlreadyImportedCount(queries: ReadonlyArray<SessionsQueryResult>): number {
@@ -424,8 +446,18 @@ export function ImportSessionSheet({
   );
 
   const queries = useQueries({ queries: queriesConfig });
+  const [importedSessionKeys, setImportedSessionKeys] = useState<Set<string>>(() => new Set());
 
-  const aggregatedEntries = useMemo(() => aggregateSessionEntries(queries), [queries]);
+  useEffect(() => {
+    if (!visible) {
+      setImportedSessionKeys(new Set());
+    }
+  }, [visible, workspaceDirectory]);
+
+  const aggregatedEntries = useMemo(
+    () => aggregateSessionEntries(queries, importedSessionKeys),
+    [queries, importedSessionKeys],
+  );
   const totalAlreadyImportedCount = useMemo(
     () => sumFilteredAlreadyImportedCount(queries),
     [queries],
@@ -470,8 +502,22 @@ export function ImportSessionSheet({
       });
       return agent;
     },
-    onSuccess: async (agent) => {
-      await queryClient.invalidateQueries({ queryKey: sessionsQueryRoot });
+    onSuccess: async (agent, entry) => {
+      const importedKey = getProviderSessionEntryKey(entry);
+      setImportedSessionKeys((previous) => new Set(previous).add(importedKey));
+      queryClient.setQueriesData<RecentSessionsResponse>(
+        { queryKey: sessionsQueryRoot },
+        (response) => removeImportedSessionFromResponse(response, importedKey),
+      );
+      if (serverId) {
+        const normalized = normalizeAgentSnapshot(agent, serverId);
+        useSessionStore.getState().setAgents(serverId, (previous) => {
+          const next = new Map(previous);
+          next.set(normalized.id, normalized);
+          return next;
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: sessionsQueryRoot });
       onClose();
       onImportedAgent?.(agent.id);
       onImported?.(agent);

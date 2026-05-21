@@ -17,6 +17,7 @@ import type {
   AgentLaunchContext,
   AgentProvider,
   AgentPersistenceHandle,
+  AgentPromptInput,
   AgentRunResult,
   AgentSession,
   AgentSessionConfig,
@@ -1303,8 +1304,8 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
       args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/paseo.sock"],
     },
   });
+  expect(resumed.config.model).toBeUndefined();
   expect(client.lastResumeOverrides).toMatchObject({
-    model: "gpt-5.4",
     modeId: "auto",
     systemPrompt: "new prompt",
     mcpServers: {
@@ -1321,6 +1322,46 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
       PASEO_AGENT_ID: resumed.id,
     },
   });
+});
+
+test("resumeAgentFromPersistence passes explicit model overrides to the provider", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-resume-model-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+
+  class ResumeModelCaptureClient extends TestAgentClient {
+    lastResumeOverrides: Partial<AgentSessionConfig> | undefined;
+
+    override async resumeSession(
+      handle: AgentPersistenceHandle,
+      overrides?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      this.lastResumeOverrides = overrides;
+      return new TestAgentSession({
+        provider: handle.provider,
+        cwd: overrides?.cwd ?? workdir,
+        model: overrides?.model,
+      });
+    }
+  }
+
+  const client = new ResumeModelCaptureClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+  });
+
+  await manager.resumeAgentFromPersistence(
+    {
+      provider: "codex",
+      sessionId: "resume-session-2",
+      metadata: { provider: "codex", cwd: workdir },
+    },
+    { cwd: workdir, model: "gpt-5.4" },
+  );
+
+  expect(client.lastResumeOverrides).toMatchObject({ cwd: workdir, model: "gpt-5.4" });
 });
 
 test("findPersistedAgent returns matching descriptors by session id or native handle", async () => {
@@ -2400,6 +2441,128 @@ test("does not trim committed history", async () => {
   expect(fetched.rows).toHaveLength(3);
   expect(fetched.window.minSeq).toBe(1);
   expect(fetched.window.maxSeq).toBe(3);
+});
+
+test("tryRunOutOfBand can force provider history rehydration and append follow-up timeline", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-oob-rehydrate-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+
+  class RehydrateCommandSession extends TestAgentSession {
+    tryHandleOutOfBand(prompt: AgentPromptInput) {
+      if (prompt !== "/tree entry-user-1") {
+        return null;
+      }
+      return {
+        run: async () => ({
+          rehydrateTimeline: true,
+          timelineItems: [{ type: "assistant_message" as const, text: "Navigated Pi tree" }],
+        }),
+      };
+    }
+
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      yield {
+        type: "timeline",
+        provider: this.provider,
+        item: { type: "user_message", text: "rewound prompt", messageId: "entry-user-1" },
+      };
+      yield {
+        type: "timeline",
+        provider: this.provider,
+        item: { type: "assistant_message", text: "rewound answer" },
+      };
+    }
+  }
+
+  class RehydrateCommandClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new RehydrateCommandSession(config);
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new RehydrateCommandClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000160",
+  });
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir });
+  await manager.appendTimelineItem(snapshot.id, { type: "assistant_message", text: "old branch" });
+
+  expect(manager.tryRunOutOfBand(snapshot.id, "/tree entry-user-1")).toBe(true);
+
+  await vi.waitFor(() => {
+    expect(manager.getTimeline(snapshot.id)).toEqual([
+      { type: "user_message", text: "rewound prompt", messageId: "entry-user-1" },
+      { type: "assistant_message", text: "rewound answer" },
+      { type: "assistant_message", text: "Navigated Pi tree" },
+    ]);
+  });
+});
+
+test("foreground runs wait for pending out-of-band commands", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-oob-wait-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+  let releaseOutOfBand: (() => void) | null = null;
+  let foregroundStarted = false;
+
+  class BlockingOutOfBandSession extends TestAgentSession {
+    tryHandleOutOfBand(prompt: AgentPromptInput) {
+      if (prompt !== "/tree entry-user-1") {
+        return null;
+      }
+      return {
+        run: async () => {
+          await new Promise<void>((resolve) => {
+            releaseOutOfBand = resolve;
+          });
+          return {
+            timelineItems: [{ type: "assistant_message" as const, text: "Navigated Pi tree" }],
+          };
+        },
+      };
+    }
+
+    override async startTurn(prompt?: AgentPromptInput): Promise<{ turnId: string }> {
+      foregroundStarted = true;
+      return super.startTurn(prompt);
+    }
+  }
+
+  class BlockingOutOfBandClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new BlockingOutOfBandSession(config);
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new BlockingOutOfBandClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000161",
+  });
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir });
+
+  expect(manager.tryRunOutOfBand(snapshot.id, "/tree entry-user-1")).toBe(true);
+  const foreground = manager.streamAgent(snapshot.id, "next prompt");
+  const consume = (async () => {
+    for await (const _ of foreground) {
+      // consume stream
+    }
+  })();
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(foregroundStarted).toBe(false);
+
+  releaseOutOfBand?.();
+  await consume;
+  expect(foregroundStarted).toBe(true);
+  expect(manager.getTimeline(snapshot.id)).toContainEqual({
+    type: "assistant_message",
+    text: "Navigated Pi tree",
+  });
 });
 
 test("hydrateTimeline preserves assistant chunk, reasoning, and tool timeline history", async () => {

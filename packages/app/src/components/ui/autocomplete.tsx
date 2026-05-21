@@ -20,6 +20,7 @@ export interface AutocompleteOption {
   detail?: string;
   description?: string;
   kind?: "command" | "file" | "directory";
+  layout?: "inline" | "stacked";
 }
 
 interface AutocompleteProps {
@@ -63,6 +64,7 @@ function AutocompleteRow({
   const optionLabel = removeBoltGlyphs(option.label) ?? option.label;
   const optionDescription = removeBoltGlyphs(option.description);
   const isFileOrDir = option.kind === "directory" || option.kind === "file";
+  const isStacked = isFileOrDir || option.layout === "stacked";
 
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) => onRowLayout(index, event),
@@ -79,15 +81,17 @@ function AutocompleteRow({
 
   return (
     <Pressable onLayout={handleLayout} onPress={handlePress} style={pressableStyle}>
-      {isFileOrDir ? (
+      {isStacked ? (
         <>
-          <View style={styles.itemLeading}>
-            {option.kind === "directory" ? (
-              <Folder size={14} color={mutedColor} />
-            ) : (
-              <File size={14} color={mutedColor} />
-            )}
-          </View>
+          {isFileOrDir ? (
+            <View style={styles.itemLeading}>
+              {option.kind === "directory" ? (
+                <Folder size={14} color={mutedColor} />
+              ) : (
+                <File size={14} color={mutedColor} />
+              )}
+            </View>
+          ) : null}
           <View style={styles.itemMain}>
             <View style={styles.itemHeader}>
               <Text style={styles.itemLabel}>{optionLabel}</Text>
@@ -96,7 +100,7 @@ function AutocompleteRow({
               ) : null}
             </View>
             {optionDescription ? (
-              <Text style={styles.itemDescription} numberOfLines={1}>
+              <Text style={styles.itemDescription} numberOfLines={isFileOrDir ? 1 : 2}>
                 {optionDescription}
               </Text>
             ) : null}

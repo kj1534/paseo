@@ -178,6 +178,8 @@ export async function sendPromptToAgent(
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
 
+  await params.agentManager.waitForOutOfBand(params.agentId);
+
   if (recordUserMessage && params.userMessageText !== undefined) {
     try {
       params.agentManager.recordUserMessage(params.agentId, params.userMessageText, {

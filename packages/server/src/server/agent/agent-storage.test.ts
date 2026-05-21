@@ -505,6 +505,26 @@ describe("AgentStorage", () => {
     expect(dirs[0]).toBe("D-Users-dev-MyProject");
   });
 
+  test("failed atomic writes do not poison later writes for the same agent", async () => {
+    const agentId = "agent-rename-recovery";
+    const storageInternals = storage as unknown as {
+      buildRecordPath(record: { id: string }): string;
+    };
+    const originalBuildRecordPath = storageInternals.buildRecordPath.bind(storage);
+    storageInternals.buildRecordPath = () =>
+      path.join(storagePath, "invalid\0path", `${agentId}.json`);
+
+    try {
+      await expect(storage.applySnapshot(createManagedAgent({ id: agentId }))).rejects.toThrow();
+    } finally {
+      storageInternals.buildRecordPath = originalBuildRecordPath;
+    }
+
+    await storage.applySnapshot(createManagedAgent({ id: agentId }));
+    const record = await storage.get(agentId);
+    expect(record?.id).toBe(agentId);
+  });
+
   test("remove deletes all duplicate record files across project directories", async () => {
     const agentId = "agent-duplicate";
 

@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.onnx binary
+*.png binary
+*.webp binary
+
+AGENTS.md -text -eol
+packages/server/AGENTS.md -text -eol

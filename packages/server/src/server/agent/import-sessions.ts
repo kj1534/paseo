@@ -123,6 +123,9 @@ export async function listImportableProviderSessions(
     if (isMetadataGenerationDescriptor(descriptor)) {
       continue;
     }
+    if (!hasUserPrompt(descriptor)) {
+      continue;
+    }
     const providerHandleId =
       descriptor.persistence.nativeHandle ?? descriptor.persistence.sessionId;
     if (importedHandles.has(toProviderSessionHandleKey(descriptor.provider, providerHandleId))) {
@@ -364,6 +367,12 @@ function shouldStoredAgentBlockImport(record: StoredAgentRecord): boolean {
     return false;
   }
   return record.lastStatus !== "closed";
+}
+
+function hasUserPrompt(descriptor: PersistedAgentDescriptor): boolean {
+  return descriptor.timeline.some(
+    (item) => item.type === "user_message" && item.text.trim() !== "",
+  );
 }
 
 function collectProviderSessionHandleKeys(

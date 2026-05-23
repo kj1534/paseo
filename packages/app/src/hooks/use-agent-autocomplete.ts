@@ -165,9 +165,13 @@ function mapCommandMatchesToOptions(args: {
         ),
         ...providerCommands,
       ];
-  const matches = availableCommands.filter((entry) =>
-    entry.command.name.toLowerCase().includes(filterLower),
-  );
+  const matches = availableCommands.filter((entry) => {
+    if (entry.source === "provider") {
+      return entry.command.name.toLowerCase().includes(filterLower);
+    }
+    const candidates = [entry.command.name, ...entry.command.aliases];
+    return candidates.some((candidate) => candidate.toLowerCase().includes(filterLower));
+  });
   return orderAutocompleteOptions(matches).map(mapCommandToOption);
 }
 

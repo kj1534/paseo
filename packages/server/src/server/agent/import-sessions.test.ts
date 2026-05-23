@@ -162,6 +162,7 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
       cwd,
       title: "Already stored",
       lastActivityAt: "2026-04-30T12:04:00.000Z",
+      firstPrompt: "stored prompt",
     }),
     makeDescriptor({
       sessionId: "older-session",
@@ -201,6 +202,7 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
       cwd,
       title: "Already live",
       lastActivityAt: "2026-04-30T12:01:00.000Z",
+      firstPrompt: "live prompt",
     }),
   ];
   const listImportablePersistedAgents = vi.fn(async () => descriptors);
@@ -277,6 +279,7 @@ test("listImportableProviderSessions allows closed or archived stored sessions t
       cwd,
       title: "Closed",
       lastActivityAt: "2026-04-30T12:03:00.000Z",
+      firstPrompt: "closed prompt",
     }),
     makeDescriptor({
       sessionId: "archived-session",
@@ -284,6 +287,7 @@ test("listImportableProviderSessions allows closed or archived stored sessions t
       cwd,
       title: "Archived",
       lastActivityAt: "2026-04-30T12:02:00.000Z",
+      firstPrompt: "archived prompt",
     }),
     makeDescriptor({
       sessionId: "idle-session",
@@ -291,6 +295,7 @@ test("listImportableProviderSessions allows closed or archived stored sessions t
       cwd,
       title: "Still imported",
       lastActivityAt: "2026-04-30T12:01:00.000Z",
+      firstPrompt: "idle prompt",
     }),
   ];
 
